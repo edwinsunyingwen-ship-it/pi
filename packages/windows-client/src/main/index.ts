@@ -3,7 +3,9 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
 import type {
 	AgentCoreConfig,
+	AgentConfig,
 	AppEnvironment,
+	AuditLogQuery,
 	CapabilityConfig,
 	ModelConfig,
 	ModelProfileConfig,
@@ -82,6 +84,10 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.configDeleteCapability, (_event, id: string) =>
 		configService.deleteCapabilityConfig(id),
 	);
+	ipcMain.handle(IPC_CHANNELS.configSaveAgent, (_event, agent: AgentConfig) =>
+		configService.saveAgentConfig(agent),
+	);
+	ipcMain.handle(IPC_CHANNELS.configDeleteAgent, (_event, id: string) => configService.deleteAgentConfig(id));
 	ipcMain.handle(IPC_CHANNELS.configReset, () => configService.resetConfig());
 
 	ipcMain.handle(IPC_CHANNELS.getWorkspace, () => workspaceService.getWorkspace());
@@ -92,13 +98,19 @@ function registerIpcHandlers(): void {
 		}
 		return workspaceService.chooseWorkspace(window);
 	});
-	ipcMain.handle(IPC_CHANNELS.workspaceListFiles, () => workspaceFileService.listFiles());
-	ipcMain.handle(IPC_CHANNELS.workspaceReadFile, (_event, relativePath: string) =>
-		workspaceFileService.readFile(relativePath),
+	ipcMain.handle(IPC_CHANNELS.workspaceListFiles, (_event, workspacePath?: string | null) =>
+		workspaceFileService.listFiles(workspacePath),
 	);
-	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, limit?: number) => auditLogger.listRecent(limit));
+	ipcMain.handle(IPC_CHANNELS.workspaceReadFile, (_event, relativePath: string, workspacePath?: string | null) =>
+		workspaceFileService.readFile(relativePath, workspacePath),
+	);
+	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, query?: AuditLogQuery) =>
+		auditLogger.listRecent(query),
+	);
 
-	ipcMain.handle(IPC_CHANNELS.agentStartSession, () => agentService.startSession());
+	ipcMain.handle(IPC_CHANNELS.agentStartSession, (_event, agentId?: string, workspacePath?: string | null) =>
+		agentService.startSession(agentId, workspacePath),
+	);
 	ipcMain.handle(IPC_CHANNELS.agentStopSession, (_event, sessionId: string) => agentService.stopSession(sessionId));
 	ipcMain.handle(IPC_CHANNELS.agentGetSessionState, (_event, sessionId: string) =>
 		agentService.getSessionState(sessionId),

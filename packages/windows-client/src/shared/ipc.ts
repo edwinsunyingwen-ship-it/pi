@@ -7,6 +7,8 @@ export const IPC_CHANNELS = {
 	configTestModel: "config:test-model",
 	configSaveCapability: "config:save-capability",
 	configDeleteCapability: "config:delete-capability",
+	configSaveAgent: "config:save-agent",
+	configDeleteAgent: "config:delete-agent",
 	configReset: "config:reset",
 	getWorkspace: "workspace:get",
 	chooseWorkspace: "workspace:choose",

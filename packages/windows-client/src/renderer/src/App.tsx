@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent, ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Bot,
@@ -18,10 +18,12 @@ import {
   Trash2,
 } from 'lucide-react';
 import type {
+  AgentConfig,
   AgentSession,
   AgentToolInfo,
   AppEnvironment,
   AuditLogEntry,
+  AuditLogQuery,
   CapabilityConfig,
   CapabilityExecutionMode,
   ClientConfig,
@@ -45,6 +47,19 @@ interface LocalNotice {
   text: string;
 }
 
+interface AgentConversationState {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  session: AgentSession | null;
+  transcript: TranscriptItem[];
+  draftMessage: string;
+  workspace: WorkspaceState;
+}
+
+const auditPageSize = 100;
+
 const auditActionLabels: Record<string, string> = {
   'select-workspace': '选择工作区',
   'list-available-tools': '列出业务能力',
@@ -63,6 +78,8 @@ const auditActionLabels: Record<string, string> = {
   'agent-user-question': '用户提问',
   'agent-assistant-reply': 'Agent 回复',
   'test-model-connection': '模型联通测试',
+  'save-agent-config': '保存智能体配置',
+  'delete-agent-config': '删除智能体配置',
 };
 
 interface ProviderPreset {
@@ -266,6 +283,11 @@ const capabilityTriggerLabels: Record<CapabilityConfig['triggerMode'], string> =
   'agent-and-workflow': '智能体 + 工作流',
 };
 
+const agentTypeLabels: Record<AgentConfig['type'], string> = {
+  primary: '主智能体',
+  sub: '子智能体',
+};
+
 function formatBytes(size: number): string {
   if (size < 1024) {
     return `${size} B`;
@@ -304,6 +326,23 @@ function createCapabilityConfig(): CapabilityConfig {
     lastTestedAt: null,
     usedByAgentIds: [],
     tags: [],
+    notes: '',
+  };
+}
+
+function createAgentConfig(): AgentConfig {
+  return {
+    id: crypto.randomUUID(),
+    name: '',
+    description: '',
+    type: 'primary',
+    parentAgentIds: [],
+    childAgentIds: [],
+    modelIds: [],
+    defaultModelId: null,
+    capabilityIds: [],
+    maxDelegationDepth: 3,
+    enabled: true,
     notes: '',
   };
 }
@@ -400,12 +439,55 @@ function formatModelName(model: ModelProfileConfig | undefined | null): string {
   return `${provider} / ${modelId}`;
 }
 
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function formatDateTimeInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = padDatePart(date.getMonth() + 1);
+  const day = padDatePart(date.getDate());
+  const hour = padDatePart(date.getHours());
+  const minute = padDatePart(date.getMinutes());
+  const second = padDatePart(date.getSeconds());
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+}
+
+function createDefaultAuditQuery(): AuditLogQuery {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 7);
+  start.setHours(0, 0, 0, 0);
+  return {
+    startTime: formatDateTimeInput(start),
+    endTime: formatDateTimeInput(end),
+    businessAction: '',
+    status: '',
+    keyword: '',
+    limit: auditPageSize,
+    offset: 0,
+  };
+}
+
+function createAgentConversation(agent: AgentConfig | null | undefined): AgentConversationState {
+  const createdAt = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    title: agent ? `${agent.name} 会话` : '新的会话',
+    createdAt,
+    updatedAt: createdAt,
+    session: null,
+    transcript: [],
+    draftMessage: '',
+    workspace: { path: null, selectedAt: null },
+  };
+}
+
 function App(): ReactElement {
   const [environment, setEnvironment] = useState<AppEnvironment | null>(null);
   const [configState, setConfigState] = useState<ClientConfigState | null>(null);
   const [draftConfig, setDraftConfig] = useState<ClientConfig | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState>({ path: null, selectedAt: null });
-  const [session, setSession] = useState<AgentSession | null>(null);
   const [tools, setTools] = useState<AgentToolInfo[]>([]);
   const [files, setFiles] = useState<WorkspaceFileInfo[]>([]);
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileInfo | null>(null);
@@ -413,18 +495,28 @@ function App(): ReactElement {
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
   const [auditPath, setAuditPath] = useState<string | null>(null);
   const [auditRefreshedAt, setAuditRefreshedAt] = useState<string | null>(null);
-  const [draftMessage, setDraftMessage] = useState('');
-  const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+  const [auditQuery, setAuditQuery] = useState<AuditLogQuery>(() => createDefaultAuditQuery());
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditHasMore, setAuditHasMore] = useState(false);
+  const [auditTimeRangeLocked, setAuditTimeRangeLocked] = useState(false);
   const [statusText, setStatusText] = useState('就绪');
   const [agentNotice, setAgentNotice] = useState<LocalNotice | null>(null);
   const [configNotice, setConfigNotice] = useState<LocalNotice | null>(null);
   const [modelEditorNotice, setModelEditorNotice] = useState<LocalNotice | null>(null);
-  const [activeSection, setActiveSection] = useState<'workspace' | 'agent' | 'config'>(
-    'workspace',
+  const [activeSection, setActiveSection] = useState<'workbench' | 'workspace' | 'agent' | 'config' | 'logs'>(
+    'workbench',
   );
-  const [activeConfigTab, setActiveConfigTab] = useState<'models' | 'core' | 'capabilities' | 'audit'>(
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [conversationRevision, setConversationRevision] = useState(0);
+  const [startingConversationId, setStartingConversationId] = useState<string | null>(null);
+  const agentConversationsRef = useRef<Record<string, AgentConversationState[]>>({});
+  const activeConversationIdsRef = useRef<Record<string, string>>({});
+  const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
+  const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities'>(
     'models',
   );
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const selectedAgentIdRef = useRef<string | null>(null);
   const [modelFilters, setModelFilters] = useState({
     provider: '',
     setupMode: '',
@@ -440,10 +532,15 @@ function App(): ReactElement {
     triggerMode: '',
   });
   const [capabilityEditor, setCapabilityEditor] = useState<CapabilityConfig | null>(null);
+  const [agentEditor, setAgentEditor] = useState<AgentConfig | null>(null);
 
   useEffect(() => {
     void refreshInitialState();
   }, []);
+
+  useEffect(() => {
+    selectedAgentIdRef.current = selectedAgentId;
+  }, [selectedAgentId]);
 
   const environmentLine = useMemo(() => {
     if (!environment) {
@@ -499,34 +596,216 @@ function App(): ReactElement {
     return formatModelName(defaultModel);
   }, [draftConfig?.model.defaultModelId, draftConfig?.model.models]);
 
+  const primaryAgents = useMemo(
+    () => (draftConfig?.agents ?? []).filter((agent) => agent.type === 'primary' && agent.enabled),
+    [draftConfig?.agents],
+  );
+
+  const selectedAgent = useMemo(() => {
+    const agents = draftConfig?.agents ?? [];
+    return (
+      agents.find((agent) => agent.id === selectedAgentId) ??
+      agents.find((agent) => agent.id === draftConfig?.defaultAgentId) ??
+      agents.find((agent) => agent.type === 'primary' && agent.enabled) ??
+      agents[0] ??
+      null
+    );
+  }, [draftConfig?.agents, draftConfig?.defaultAgentId, selectedAgentId]);
+
+  const selectedConversation = useMemo(
+    () => {
+      if (!selectedAgent) {
+        return createAgentConversation(null);
+      }
+      const conversations = agentConversationsRef.current[selectedAgent.id] ?? [];
+      const activeConversationId = activeConversationIdsRef.current[selectedAgent.id];
+      return (
+        conversations.find((conversation) => conversation.id === activeConversationId) ??
+        conversations[0] ??
+        createAgentConversation(selectedAgent)
+      );
+    },
+    [selectedAgent, conversationRevision],
+  );
+  const session = selectedConversation.session;
+  const transcript = selectedConversation.transcript;
+  const draftMessage = selectedConversation.draftMessage;
+  const sessionTitle = selectedConversation.title;
+  const activeWorkspace = selectedConversation.workspace;
+  const sessionReady = Boolean(session && session.state !== 'stopped');
+  const sessionStarting = startingConversationId === selectedConversation.id;
+  const selectedAgentConversations = selectedAgent
+    ? agentConversationsRef.current[selectedAgent.id] ?? [selectedConversation]
+    : [];
+
+  useEffect(() => {
+    setSelectedFile(null);
+    setFileContent('');
+    if (!activeWorkspace.path) {
+      setFiles([]);
+      return;
+    }
+    void refreshWorkspaceFiles(activeWorkspace.path);
+  }, [selectedConversation.id, activeWorkspace.path]);
+
+  useEffect(() => {
+    if (
+      !selectedAgent ||
+      sessionReady ||
+      sessionStarting ||
+      manualStoppedConversationIdsRef.current.has(selectedConversation.id)
+    ) {
+      return;
+    }
+
+    void startSession({ silent: true });
+  }, [selectedAgent?.id, selectedConversation.id, sessionReady, sessionStarting]);
+
+  function commitAgentConversation(agentId: string, conversation: AgentConversationState): void {
+    const nextConversation = {
+      ...conversation,
+      transcript: [...conversation.transcript],
+      updatedAt: new Date().toISOString(),
+    };
+    const existingConversations = agentConversationsRef.current[agentId] ?? [];
+    const nextConversations = existingConversations.some((item) => item.id === nextConversation.id)
+      ? existingConversations.map((item) => (item.id === nextConversation.id ? nextConversation : item))
+      : [nextConversation, ...existingConversations];
+    agentConversationsRef.current = {
+      ...agentConversationsRef.current,
+      [agentId]: nextConversations,
+    };
+    activeConversationIdsRef.current = {
+      ...activeConversationIdsRef.current,
+      [agentId]: nextConversation.id,
+    };
+    setConversationRevision((revision) => revision + 1);
+  }
+
+  function saveCurrentConversation(patch: Partial<AgentConversationState> = {}): void {
+    if (!selectedAgent) {
+      return;
+    }
+    const existing =
+      agentConversationsRef.current[selectedAgent.id]?.find((item) => item.id === selectedConversation.id) ??
+      selectedConversation;
+    commitAgentConversation(selectedAgent.id, {
+      ...existing,
+      title: sessionTitle,
+      session,
+      transcript: [...transcript],
+      draftMessage,
+      workspace: activeWorkspace,
+      ...patch,
+    });
+  }
+
+  function switchWorkbenchAgent(agent: AgentConfig): void {
+    if (!agentConversationsRef.current[agent.id]?.length) {
+      commitAgentConversation(agent.id, createAgentConversation(agent));
+    }
+    selectedAgentIdRef.current = agent.id;
+    setSelectedAgentId(agent.id);
+  }
+
+  function createNewConversation(): void {
+    if (!selectedAgent) {
+      return;
+    }
+    const nextConversation = {
+      ...createAgentConversation(selectedAgent),
+      workspace: activeWorkspace,
+    };
+    manualStoppedConversationIdsRef.current.delete(nextConversation.id);
+    commitAgentConversation(selectedAgent.id, nextConversation);
+  }
+
+  function selectConversation(conversationId: string): void {
+    if (!selectedAgent) {
+      return;
+    }
+    activeConversationIdsRef.current = {
+      ...activeConversationIdsRef.current,
+      [selectedAgent.id]: conversationId,
+    };
+    setAgentNotice(null);
+    setConversationRevision((revision) => revision + 1);
+  }
+
   async function refreshInitialState(): Promise<void> {
+    const initialAuditQuery = createDefaultAuditQuery();
     const [nextEnvironment, nextConfig, nextWorkspace, nextTools, nextAudit] = await Promise.all([
       window.windowsClient.getEnvironment(),
       window.windowsClient.getClientConfig(),
       window.windowsClient.getWorkspace(),
       window.windowsClient.listAvailableTools(),
-      window.windowsClient.listAuditLogs(80),
+      window.windowsClient.listAuditLogs(initialAuditQuery),
     ]);
 
     setEnvironment(nextEnvironment);
     setConfigState(nextConfig);
     setDraftConfig(nextConfig.config);
+    setSelectedAgentId((current) => {
+      const nextAgentId =
+        current && nextConfig.config.agents.some((agent) => agent.id === current)
+          ? current
+          : nextConfig.config.defaultAgentId;
+      selectedAgentIdRef.current = nextAgentId;
+      return nextAgentId;
+    });
     setWorkspace(nextWorkspace);
     setTools(nextTools);
+    setAuditQuery(initialAuditQuery);
     setAuditEntries(sortAuditEntries(nextAudit.entries));
     setAuditPath(nextAudit.logFilePath);
     setAuditRefreshedAt(new Date().toISOString());
+    setAuditTotal(nextAudit.total);
+    setAuditHasMore(nextAudit.hasMore);
 
     if (nextWorkspace.path) {
       await refreshWorkspaceFiles();
     }
   }
 
-  async function refreshAuditLogs(): Promise<void> {
-    const result = await window.windowsClient.listAuditLogs(80);
-    setAuditEntries(sortAuditEntries(result.entries));
+  async function loadAuditLogs(query: AuditLogQuery, append = false): Promise<void> {
+    const nextQuery: AuditLogQuery = {
+      ...query,
+      limit: auditPageSize,
+      offset: query.offset ?? 0,
+    };
+    const result = await window.windowsClient.listAuditLogs(nextQuery);
+    setAuditQuery(nextQuery);
+    setAuditEntries((current) =>
+      append ? sortAuditEntries([...current, ...result.entries]) : sortAuditEntries(result.entries),
+    );
     setAuditPath(result.logFilePath);
     setAuditRefreshedAt(new Date().toISOString());
+    setAuditTotal(result.total);
+    setAuditHasMore(result.hasMore);
+  }
+
+  async function refreshAuditLogs(): Promise<void> {
+    const movingQuery = auditTimeRangeLocked
+      ? auditQuery
+      : {
+          ...auditQuery,
+          startTime: createDefaultAuditQuery().startTime,
+          endTime: createDefaultAuditQuery().endTime,
+        };
+    await loadAuditLogs({ ...movingQuery, offset: 0 });
+  }
+
+  async function applyAuditFilters(): Promise<void> {
+    await loadAuditLogs({ ...auditQuery, offset: 0 });
+  }
+
+  async function resetAuditFilters(): Promise<void> {
+    setAuditTimeRangeLocked(false);
+    await loadAuditLogs(createDefaultAuditQuery());
+  }
+
+  async function loadMoreAuditLogs(): Promise<void> {
+    await loadAuditLogs({ ...auditQuery, offset: auditEntries.length }, true);
   }
 
   async function saveAgentCoreConfig(): Promise<void> {
@@ -540,6 +819,67 @@ function App(): ReactElement {
     setDraftConfig(nextConfig.config);
     setConfigNotice({ tone: 'success', text: '智能体内核配置已保存。' });
     setStatusText('智能体内核配置已保存');
+    await refreshAuditLogs();
+  }
+
+  async function saveAgentConfig(agent: AgentConfig): Promise<void> {
+    if (!agent.name.trim()) {
+      setConfigNotice({ tone: 'error', text: '智能体名称不能为空。' });
+      setStatusText('智能体名称不能为空');
+      return;
+    }
+    if (agent.type === 'sub' && agent.parentAgentIds.length === 0) {
+      setConfigNotice({ tone: 'error', text: '子智能体至少需要选择一个上级智能体。' });
+      setStatusText('子智能体至少需要选择一个上级智能体');
+      return;
+    }
+    if (agent.modelIds.length === 0) {
+      setConfigNotice({ tone: 'error', text: '智能体至少需要关联一个可用模型。' });
+      setStatusText('智能体至少需要关联一个可用模型');
+      return;
+    }
+
+    const normalizedAgent = {
+      ...agent,
+      name: agent.name.trim(),
+      defaultModelId:
+        agent.defaultModelId && agent.modelIds.includes(agent.defaultModelId)
+          ? agent.defaultModelId
+          : agent.modelIds[0],
+      parentAgentIds: agent.type === 'sub' ? agent.parentAgentIds : [],
+      childAgentIds: agent.childAgentIds.filter((id) => id !== agent.id),
+    };
+    setStatusText(`正在保存智能体：${normalizedAgent.name}`);
+    const nextConfig = await window.windowsClient.saveAgentConfig(normalizedAgent);
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    setAgentEditor(null);
+    setSelectedAgentId((current) => current ?? normalizedAgent.id);
+    setConfigNotice({ tone: 'success', text: `智能体已保存：${normalizedAgent.name}` });
+    setStatusText(`智能体已保存：${normalizedAgent.name}`);
+    await refreshAuditLogs();
+  }
+
+  async function deleteAgentConfig(id: string): Promise<void> {
+    const agent = draftConfig?.agents.find((item) => item.id === id);
+    if (!agent) {
+      return;
+    }
+    if (draftConfig?.agents.some((item) => item.parentAgentIds.includes(id))) {
+      setConfigNotice({ tone: 'error', text: '该智能体仍有下级引用，请先调整子智能体关系。' });
+      setStatusText('该智能体仍有下级引用，暂不能删除');
+      return;
+    }
+    if (!window.confirm(`确认删除智能体“${agent.name}”吗？`)) {
+      return;
+    }
+    const nextConfig = await window.windowsClient.deleteAgentConfig(id);
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    setAgentEditor(null);
+    setSelectedAgentId(nextConfig.config.defaultAgentId);
+    setConfigNotice({ tone: 'success', text: `智能体已删除：${agent.name}` });
+    setStatusText(`智能体已删除：${agent.name}`);
     await refreshAuditLogs();
   }
 
@@ -882,6 +1222,68 @@ function App(): ReactElement {
     setCapabilityEditor((capability) => (capability ? { ...capability, [key]: value } : capability));
   }
 
+  function updateAgentEditor<K extends keyof AgentConfig>(key: K, value: AgentConfig[K]): void {
+    setAgentEditor((agent) => (agent ? { ...agent, [key]: value } : agent));
+  }
+
+  function toggleAgentModel(modelId: string, checked: boolean): void {
+    setAgentEditor((agent) => {
+      if (!agent) {
+        return agent;
+      }
+      const modelIds = checked
+        ? Array.from(new Set([...agent.modelIds, modelId]))
+        : agent.modelIds.filter((id) => id !== modelId);
+      return {
+        ...agent,
+        modelIds,
+        defaultModelId:
+          agent.defaultModelId && modelIds.includes(agent.defaultModelId)
+            ? agent.defaultModelId
+            : (modelIds[0] ?? null),
+      };
+    });
+  }
+
+  function toggleAgentCapability(capabilityId: string, checked: boolean): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            capabilityIds: checked
+              ? Array.from(new Set([...agent.capabilityIds, capabilityId]))
+              : agent.capabilityIds.filter((id) => id !== capabilityId),
+          }
+        : agent,
+    );
+  }
+
+  function toggleAgentParent(parentId: string, checked: boolean): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            parentAgentIds: checked
+              ? Array.from(new Set([...agent.parentAgentIds, parentId]))
+              : agent.parentAgentIds.filter((id) => id !== parentId),
+          }
+        : agent,
+    );
+  }
+
+  function toggleAgentChild(childId: string, checked: boolean): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            childAgentIds: checked
+              ? Array.from(new Set([...agent.childAgentIds, childId]))
+              : agent.childAgentIds.filter((id) => id !== childId),
+          }
+        : agent,
+    );
+  }
+
   function removeCapability(id: string): void {
     setDraftConfig((config) =>
       config
@@ -893,21 +1295,46 @@ function App(): ReactElement {
     );
   }
 
-  async function refreshWorkspaceFiles(): Promise<void> {
-    const result = await window.windowsClient.listWorkspaceFiles();
+  async function refreshWorkspaceFiles(workspacePath = activeWorkspace.path): Promise<void> {
+    if (!workspacePath) {
+      setFiles([]);
+      setSelectedFile(null);
+      setFileContent('');
+      await refreshAuditLogs();
+      return;
+    }
+
+    const result = await window.windowsClient.listWorkspaceFiles(workspacePath);
     setFiles(result.files);
     await refreshAuditLogs();
   }
 
   async function chooseWorkspace(): Promise<void> {
     setStatusText('正在选择工作区');
+    const previousWorkspace = workspace;
     const selectedWorkspace = await window.windowsClient.chooseWorkspace();
+    const selectionCancelled =
+      selectedWorkspace.path === previousWorkspace.path &&
+      selectedWorkspace.selectedAt === previousWorkspace.selectedAt;
+
+    if (selectionCancelled) {
+      setStatusText('工作区未变更');
+      await refreshAuditLogs();
+      return;
+    }
+
+    const previousSession = session;
     setWorkspace(selectedWorkspace);
+    manualStoppedConversationIdsRef.current.delete(selectedConversation.id);
+    saveCurrentConversation({ workspace: selectedWorkspace, session: null });
     setSelectedFile(null);
     setFileContent('');
-    setStatusText(selectedWorkspace.path ? '工作区已保存并写入审计日志' : '工作区未变更');
+    setStatusText(selectedWorkspace.path ? '工作区已保存并写入操作日志' : '工作区未变更');
+    if (previousSession && previousSession.state !== 'stopped') {
+      await window.windowsClient.stopAgentSession(previousSession.id);
+    }
     if (selectedWorkspace.path) {
-      await refreshWorkspaceFiles();
+      await refreshWorkspaceFiles(selectedWorkspace.path);
     }
     await refreshAuditLogs();
   }
@@ -918,26 +1345,52 @@ function App(): ReactElement {
     }
 
     setStatusText(`正在读取文件：${file.relativePath}`);
-    const result = await window.windowsClient.readWorkspaceFile(file.relativePath);
+    const result = await window.windowsClient.readWorkspaceFile(file.relativePath, activeWorkspace.path);
     setSelectedFile(result.file);
     setFileContent(result.content);
     setStatusText('文件预览已更新');
     await refreshAuditLogs();
   }
 
-  async function startSession(): Promise<void> {
+  async function startSession(options: { silent?: boolean; force?: boolean } = {}): Promise<AgentSession | null> {
+    const startingConversationId = selectedConversation.id;
     try {
-      setAgentNotice({ tone: 'info', text: '正在启动智能体会话...' });
-      setStatusText('正在启动智能体会话');
-      const nextSession = await window.windowsClient.startAgentSession();
-      setSession(nextSession);
-      setAgentNotice({ tone: 'success', text: '智能体会话已就绪，可以发送测试消息。' });
-      setStatusText('智能体适配器会话已就绪');
-      await refreshAuditLogs();
+      if (!selectedAgent) {
+        setAgentNotice({ tone: 'error', text: '请先选择一个主智能体。' });
+        setStatusText('请先选择一个主智能体');
+        return null;
+      }
+      const startingAgent = selectedAgent;
+      const startingConversation = selectedConversation;
+      const startingWorkspace = activeWorkspace;
+      if (!options.force && startingConversation.session && startingConversation.session.state !== 'stopped') {
+        return startingConversation.session;
+      }
+
+      setStartingConversationId(startingConversation.id);
+      manualStoppedConversationIdsRef.current.delete(startingConversation.id);
+      if (!options.silent) {
+        setAgentNotice({ tone: 'info', text: '正在准备智能体会话...' });
+      }
+      setStatusText('正在准备智能体会话');
+      const nextSession = await window.windowsClient.startAgentSession(startingAgent.id, startingWorkspace.path);
+      commitAgentConversation(startingAgent.id, {
+        ...startingConversation,
+        session: nextSession,
+        transcript: [...startingConversation.transcript],
+        draftMessage: startingConversation.draftMessage,
+        workspace: startingWorkspace,
+      });
+      setAgentNotice({ tone: 'success', text: `智能体“${startingAgent.name}”会话已就绪，可以发送消息。` });
+      setStatusText(`智能体“${startingAgent.name}”会话已就绪`);
+      return nextSession;
     } catch (error) {
       const message = error instanceof Error ? `启动会话失败：${error.message}` : '启动会话失败';
       setAgentNotice({ tone: 'error', text: message });
       setStatusText(message);
+      return null;
+    } finally {
+      setStartingConversationId((current) => (current === startingConversationId ? null : current));
       await refreshAuditLogs();
     }
   }
@@ -948,7 +1401,8 @@ function App(): ReactElement {
     }
     setStatusText('正在停止智能体会话');
     const stoppedSession = await window.windowsClient.stopAgentSession(session.id);
-    setSession(stoppedSession);
+    manualStoppedConversationIdsRef.current.add(selectedConversation.id);
+    saveCurrentConversation({ session: stoppedSession });
     setAgentNotice({ tone: 'success', text: '智能体会话已停止。' });
     setStatusText('智能体会话已停止');
     await refreshAuditLogs();
@@ -956,29 +1410,65 @@ function App(): ReactElement {
 
   async function sendMessage(): Promise<void> {
     const message = draftMessage.trim();
-    if (!message || !session || session.state === 'stopped') {
+    const messageAgent = selectedAgent;
+    if (!message || !messageAgent) {
       return;
     }
+    let messageSession = session;
+    const messageConversation = selectedConversation;
+    if (!messageSession || messageSession.state === 'stopped') {
+      messageSession = await startSession({ silent: true });
+      if (!messageSession) {
+        return;
+      }
+    }
 
-    setDraftMessage('');
-    setTranscript((items) => [
-      ...items,
-      { role: 'user', text: message, createdAt: new Date().toISOString() },
-    ]);
+    const userItem: TranscriptItem = { role: 'user', text: message, createdAt: new Date().toISOString() };
+    const userTranscript = [...transcript, userItem];
+    commitAgentConversation(messageAgent.id, {
+      ...messageConversation,
+      draftMessage: '',
+      transcript: userTranscript,
+    });
     setStatusText('正在通过适配器发送消息');
 
-    const result = await window.windowsClient.sendAgentUserMessage(session.id, message);
-    setTranscript((items) => [
-      ...items,
-      { role: 'assistant', text: result.responseText, createdAt: result.createdAt },
-    ]);
-    const currentSession = await window.windowsClient.getAgentSessionState(session.id);
-    setSession(currentSession);
+    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, message);
+    const assistantTranscript = [
+      ...userTranscript,
+      { role: 'assistant' as const, text: result.responseText, createdAt: result.createdAt },
+    ];
+    const currentSession = await window.windowsClient.getAgentSessionState(messageSession.id);
+    const nextSession = currentSession
+      ? {
+          ...currentSession,
+          agentId: messageSession.agentId,
+          agentName: messageSession.agentName,
+          modelId: messageSession.modelId,
+        }
+      : currentSession;
+    commitAgentConversation(messageAgent.id, {
+      ...messageConversation,
+      session: nextSession,
+      transcript: assistantTranscript,
+      draftMessage: '',
+    });
     setStatusText('已收到适配器响应');
     await refreshAuditLogs();
   }
 
-  const canSend = Boolean(draftMessage.trim() && session && session.state !== 'stopped');
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key !== 'Enter' || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    void sendMessage();
+  }
+
+  const canSend = Boolean(draftMessage.trim() && selectedAgent && !sessionStarting);
+  const selectedAgentModel = draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId);
+  const selectedAgentCapabilities = draftConfig?.capabilities.filter((capability) =>
+    selectedAgent?.capabilityIds.includes(capability.id),
+  ) ?? [];
   const modelEditorPreset = modelEditor ? findProviderPreset(modelEditor.provider) : undefined;
   const modelEditorRequirements = modelEditor
     ? getProviderRequirements(modelEditor)
@@ -1008,17 +1498,10 @@ function App(): ReactElement {
       <nav className="domain-nav" aria-label="功能域导航">
         <button
           type="button"
-          className={activeSection === 'workspace' ? 'active' : ''}
-          onClick={() => setActiveSection('workspace')}
+          className={activeSection === 'workbench' ? 'active' : ''}
+          onClick={() => setActiveSection('workbench')}
         >
-          工作区
-        </button>
-        <button
-          type="button"
-          className={activeSection === 'agent' ? 'active' : ''}
-          onClick={() => setActiveSection('agent')}
-        >
-          智能体
+          工作台
         </button>
         <button
           type="button"
@@ -1027,9 +1510,257 @@ function App(): ReactElement {
         >
           配置中心
         </button>
+        <button
+          type="button"
+          className={activeSection === 'logs' ? 'active' : ''}
+          onClick={() => setActiveSection('logs')}
+        >
+          操作日志
+        </button>
       </nav>
 
       <section className="dashboard-grid">
+        {activeSection === 'workbench' && (
+          <article className={`panel wide-panel workbench-shell ${contextPanelOpen ? 'context-open' : ''}`}>
+            <div className="agent-tabs">
+              <div className="agent-tab-list" role="tablist" aria-label="主智能体">
+                {primaryAgents.length === 0 ? (
+                  <span className="empty-state">暂无可用主智能体，请先到配置中心创建或启用。</span>
+                ) : (
+                  primaryAgents.map((agent) => (
+                    <button
+                      type="button"
+                      className={selectedAgent?.id === agent.id ? 'active' : ''}
+                      key={agent.id}
+                      onClick={() => switchWorkbenchAgent(agent)}
+                    >
+                      {agent.name}
+                    </button>
+                  ))
+                )}
+              </div>
+              <button
+                type="button"
+                className="quiet-button compact-button"
+                onClick={() => {
+                  if (selectedAgent) {
+                    setAgentEditor(selectedAgent);
+                    setActiveConfigTab('agents');
+                  }
+                }}
+                disabled={!selectedAgent}
+              >
+                <Settings size={16} />
+                <span>设置</span>
+              </button>
+            </div>
+
+            <div className="workbench-grid">
+              <aside className="session-sidebar">
+                <div className="section-title-row compact-title">
+                  <div>
+                    <strong>会话</strong>
+                    <span>按当前智能体展示</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="quiet-button compact-button"
+                    onClick={createNewConversation}
+                    disabled={!selectedAgent}
+                  >
+                    <Plus size={16} />
+                    <span>新建</span>
+                  </button>
+                </div>
+                <div className="session-card-list">
+                  {selectedAgentConversations.map((conversation) => {
+                    const isActiveConversation = conversation.id === selectedConversation.id;
+                    return (
+                      <div
+                        className={`session-card ${isActiveConversation ? 'active' : ''}`}
+                        key={conversation.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => selectConversation(conversation.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            selectConversation(conversation.id);
+                          }
+                        }}
+                      >
+                        {isActiveConversation ? (
+                          <input
+                            value={conversation.title}
+                            onChange={(event) => {
+                              saveCurrentConversation({ title: event.target.value });
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label="会话名称"
+                          />
+                        ) : (
+                          <strong>{conversation.title}</strong>
+                        )}
+                        <small className="session-state">
+                          <span
+                            className={`status-dot ${
+                              conversation.session && conversation.session.state !== 'stopped' ? 'online' : 'offline'
+                            }`}
+                          />
+                          {conversation.id === startingConversationId
+                            ? '准备中'
+                            : conversation.session && conversation.session.state !== 'stopped'
+                              ? '已就绪'
+                              : '未就绪'}
+                        </small>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              <section className="chat-workspace">
+                <div className="chat-header">
+                  <div>
+                    <strong>{selectedAgent?.name ?? '请选择主智能体'}</strong>
+                    <span>
+                      {activeWorkspace.path ? `工作区：${activeWorkspace.path}` : '尚未选择工作区'}
+                    </span>
+                  </div>
+                </div>
+
+                {agentNotice && <div className={`inline-notice ${agentNotice.tone}`}>{agentNotice.text}</div>}
+
+                <div className="conversation-list focused-conversation">
+                  {transcript.length === 0 ? (
+                    <p className="empty-state">选择智能体后即可开始对话，系统会自动准备会话。</p>
+                  ) : (
+                    transcript.map((item) => (
+                      <div className={`message-bubble ${item.role}`} key={`${item.createdAt}-${item.role}`}>
+                        <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+                        <span>{item.text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="workbench-actions">
+                  <div className={`agent-runtime-state ${sessionReady ? 'online' : 'offline'}`}>
+                    <span className={`status-dot ${sessionReady ? 'online' : 'offline'}`} />
+                    <strong>{sessionStarting ? '正在准备' : sessionReady ? '智能体已就绪' : '智能体未就绪'}</strong>
+                  </div>
+                  {!sessionReady && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => startSession({ force: true })}
+                      disabled={!selectedAgent || sessionStarting}
+                    >
+                      <Bot size={18} />
+                      <span>{sessionStarting ? '准备中' : '重试启动'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    disabled={!sessionReady}
+                    onClick={stopSession}
+                  >
+                    <Square size={16} />
+                    <span>停止</span>
+                  </button>
+                </div>
+
+                <div className="composer workbench-composer">
+                  <div className="composer-tools">
+                    <button type="button" className="quiet-button compact-button" onClick={chooseWorkspace}>
+                      <FolderOpen size={16} />
+                      <span>工作区</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="quiet-button compact-button"
+                      onClick={() => setContextPanelOpen(true)}
+                    >
+                      <FileText size={16} />
+                      <span>文件</span>
+                    </button>
+                  </div>
+                  <textarea
+                    value={draftMessage}
+                    onChange={(event) => {
+                      saveCurrentConversation({ draftMessage: event.target.value });
+                    }}
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder="向当前智能体发送消息"
+                    rows={3}
+                  />
+                  <button type="button" disabled={!canSend} onClick={sendMessage}>
+                    <Send size={18} />
+                    <span>发送</span>
+                  </button>
+                </div>
+              </section>
+
+              {contextPanelOpen && (
+                <aside className="context-panel">
+                  <div className="section-title-row compact-title">
+                    <div>
+                      <strong>上下文</strong>
+                      <span>工作区、文件、模型和能力</span>
+                    </div>
+                    <button type="button" className="quiet-button compact-button" onClick={() => setContextPanelOpen(false)}>
+                      收起
+                    </button>
+                  </div>
+                  <div className="context-summary">
+                    <small>默认模型</small>
+                    <strong>{formatModelName(selectedAgentModel)}</strong>
+                  </div>
+                  <div className="context-summary">
+                    <small>可用能力</small>
+                    <strong>{selectedAgentCapabilities.length} 个</strong>
+                    <span>
+                      {selectedAgentCapabilities.length === 0
+                        ? '暂未绑定 Tools / Skills'
+                        : selectedAgentCapabilities.map((capability) => capability.name).join('、')}
+                    </span>
+                  </div>
+                  <div className="file-panel-actions">
+                    <button type="button" className="quiet-button compact-button" onClick={() => refreshWorkspaceFiles()}>
+                      刷新文件
+                    </button>
+                  </div>
+                  <div className="compact-file-list">
+                    {files.length === 0 ? (
+                      <p className="empty-state">选择工作区后显示文件。</p>
+                    ) : (
+                      files.map((file) => (
+                        <button
+                          type="button"
+                          className={`file-row ${file.kind} ${selectedFile?.relativePath === file.relativePath ? 'selected' : ''}`}
+                          key={file.relativePath}
+                          disabled={file.kind === 'directory'}
+                          title={file.relativePath}
+                          onClick={() => readFile(file)}
+                        >
+                          <span className="file-kind">{file.kind === 'directory' ? '目录' : '文件'}</span>
+                          <strong>{file.relativePath}</strong>
+                          <small>{file.kind === 'directory' ? '不可预览' : formatBytes(file.size)}</small>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <div className="file-preview compact-preview">
+                    <strong>{selectedFile ? selectedFile.relativePath : '文件预览'}</strong>
+                    <pre>{fileContent || '请选择一个工作区内的文本文件。'}</pre>
+                  </div>
+                </aside>
+              )}
+            </div>
+          </article>
+        )}
+
         {activeSection === 'workspace' && (
           <>
             <article className="panel wide-panel">
@@ -1070,7 +1801,7 @@ function App(): ReactElement {
                 </div>
                 <div>
                   <dt>本地存储</dt>
-                  <dd>本地配置 + JSONL 审计日志</dd>
+                  <dd>本地配置 + JSONL 操作日志</dd>
                 </div>
               </dl>
             </article>
@@ -1081,7 +1812,7 @@ function App(): ReactElement {
                   <FileText size={20} />
                   <h3>工作区文件</h3>
                 </div>
-                <button type="button" className="icon-button" onClick={refreshWorkspaceFiles}>
+                <button type="button" className="icon-button" onClick={() => refreshWorkspaceFiles()}>
                   <RefreshCw size={16} />
                   <span>刷新</span>
                 </button>
@@ -1122,12 +1853,43 @@ function App(): ReactElement {
             <article className="panel">
               <div className="panel-heading">
                 <Bot size={20} />
-                <h3>智能体适配器</h3>
+                <h3>当前智能体</h3>
               </div>
-              <p>当前通过本地 Pi RPC 子进程处理会话。启动会话时会读取已启用的默认模型配置，并写入审计链路。</p>
+              <p>选择一个主智能体和工作区后启动会话。会话会读取该智能体关联的默认模型、业务能力和工作区上下文。</p>
+              <label>
+                <span>主智能体</span>
+                <select
+                  value={selectedAgent?.id ?? ''}
+                  onChange={(event) => setSelectedAgentId(event.target.value)}
+                >
+                  {primaryAgents.length === 0 ? (
+                    <option value="">暂无可用主智能体</option>
+                  ) : (
+                    primaryAgents.map((agent) => (
+                      <option value={agent.id} key={agent.id}>
+                        {agent.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <dl>
+                <div>
+                  <dt>工作区</dt>
+                  <dd>{activeWorkspace.path ?? '未选择'}</dd>
+                </div>
+                <div>
+                  <dt>模型</dt>
+                  <dd>
+                    {formatModelName(
+                      draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId),
+                    )}
+                  </dd>
+                </div>
+              </dl>
               {agentNotice && <div className={`inline-notice ${agentNotice.tone}`}>{agentNotice.text}</div>}
               <div className="button-row">
-                <button type="button" className="secondary-button" onClick={startSession}>
+                <button type="button" className="secondary-button" onClick={() => startSession({ force: true })}>
                   <Bot size={18} />
                   <span>{session ? '重启会话' : '启动会话'}</span>
                 </button>
@@ -1164,7 +1926,10 @@ function App(): ReactElement {
               <div className="composer">
                 <textarea
                   value={draftMessage}
-                  onChange={(event) => setDraftMessage(event.target.value)}
+                  onChange={(event) => {
+                    saveCurrentConversation({ draftMessage: event.target.value });
+                  }}
+                  onKeyDown={handleComposerKeyDown}
                   placeholder="向 Pi 智能体发送一条测试消息"
                   rows={3}
                 />
@@ -1202,13 +1967,6 @@ function App(): ReactElement {
                 </button>
                 <button
                   type="button"
-                  className={activeConfigTab === 'core' ? 'active' : ''}
-                  onClick={() => setActiveConfigTab('core')}
-                >
-                  内核 / RPC
-                </button>
-                <button
-                  type="button"
                   className={activeConfigTab === 'capabilities' ? 'active' : ''}
                   onClick={() => setActiveConfigTab('capabilities')}
                 >
@@ -1216,12 +1974,81 @@ function App(): ReactElement {
                 </button>
                 <button
                   type="button"
-                  className={activeConfigTab === 'audit' ? 'active' : ''}
-                  onClick={() => setActiveConfigTab('audit')}
+                  className={activeConfigTab === 'agents' ? 'active' : ''}
+                  onClick={() => setActiveConfigTab('agents')}
                 >
-                  审计日志
+                  智能体配置
+                </button>
+                <button
+                  type="button"
+                  className={activeConfigTab === 'core' ? 'active' : ''}
+                  onClick={() => setActiveConfigTab('core')}
+                >
+                  内核 / RPC
                 </button>
               </nav>
+
+              {activeConfigTab === 'agents' && (
+              <section className="config-block">
+                <div className="section-title-row">
+                  <div>
+                    <strong>智能体配置</strong>
+                    <span>维护主智能体、子智能体、可用模型和 Tools / Skills 关联关系。</span>
+                  </div>
+                  <button type="button" onClick={() => setAgentEditor(createAgentConfig())}>
+                    <Plus size={16} />
+                    <span>新增智能体</span>
+                  </button>
+                </div>
+                <div className="capability-table">
+                  {draftConfig.agents.length === 0 ? (
+                    <p className="empty-state">暂无智能体。系统会默认创建一个主智能体。</p>
+                  ) : (
+                    draftConfig.agents.map((agent) => {
+                      const defaultModel = draftConfig.model.models.find((model) => model.id === agent.defaultModelId);
+                      return (
+                        <div className="capability-row" key={agent.id}>
+                          <div>
+                            <strong>{agent.name}</strong>
+                            <span>{agent.description || '未填写描述'}</span>
+                          </div>
+                          <small>{agentTypeLabels[agent.type]}</small>
+                          <small>{agent.modelIds.length} 个模型</small>
+                          <small>{agent.capabilityIds.length} 个能力</small>
+                          <small>{formatModelName(defaultModel)}</small>
+                          <small className={agent.enabled ? 'enabled' : 'disabled'}>
+                            {agent.enabled ? '已启用' : '未启用'}
+                          </small>
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => setAgentEditor(agent)}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => saveAgentConfig({ ...agent, enabled: !agent.enabled })}
+                            >
+                              {agent.enabled ? '停用' : '启用'}
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => deleteAgentConfig(agent.id)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+              )}
 
               {activeConfigTab === 'core' && (
               <section className="config-block">
@@ -1572,49 +2399,314 @@ function App(): ReactElement {
                 </div>
               </section>
               )}
-
-              {activeConfigTab === 'audit' && (
-              <section className="config-block">
-                <div className="section-title-row">
-                  <div>
-                    <strong>审计日志</strong>
-                    <span>查看本地配置、工作区、文件读取和智能体动作记录。</span>
-                  </div>
-                  <button type="button" className="icon-button" onClick={refreshAuditLogs}>
-                    <RefreshCw size={16} />
-                    <span>刷新</span>
-                  </button>
-                </div>
-                <p className="subtle-text">
-                  {auditPath ? `日志文件：${auditPath}` : '今天还没有审计日志。'}
-                  {auditRefreshedAt
-                    ? ` 最新记录在上，刷新时间：${new Date(auditRefreshedAt).toLocaleTimeString('zh-CN')}`
-                    : ''}
-                </p>
-                <div className="audit-list">
-                  {auditEntries.length === 0 ? (
-                    <p className="empty-state">暂无审计记录。</p>
-                  ) : (
-                    auditEntries.map((entry) => (
-                      <div className="audit-row" key={`${entry.timestamp}-${entry.businessAction}`}>
-                        <strong>{auditActionLabels[entry.businessAction] ?? entry.businessAction}</strong>
-                        <span>{new Date(entry.timestamp).toLocaleString('zh-CN')}</span>
-                        <p>{entry.outputSummary ?? entry.inputSummary ?? entry.toolName}</p>
-                        <small className={entry.status === 'success' ? 'enabled' : 'disabled'}>
-                          {entry.status === 'success' ? '成功' : '失败'}
-                        </small>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-              )}
             </div>
           )}
         </article>
           </>
         )}
+
+        {activeSection === 'logs' && (
+          <article className="panel wide-panel">
+            <div className="panel-heading with-action">
+              <div>
+                <ListChecks size={20} />
+                <h3>操作日志</h3>
+              </div>
+              <button type="button" className="icon-button" onClick={refreshAuditLogs}>
+                <RefreshCw size={16} />
+                <span>刷新</span>
+              </button>
+            </div>
+            <p className="subtle-text">
+              {auditPath ? `日志文件：${auditPath}` : '今天还没有操作日志。'}
+              {auditRefreshedAt
+                ? ` 最新记录在上，刷新时间：${new Date(auditRefreshedAt).toLocaleTimeString('zh-CN')}`
+                : ''}
+            </p>
+            <div className="audit-filters">
+              <label>
+                <span>操作类型</span>
+                <select
+                  value={auditQuery.businessAction ?? ''}
+                  onChange={(event) =>
+                    setAuditQuery((query) => ({ ...query, businessAction: event.target.value, offset: 0 }))
+                  }
+                >
+                  <option value="">全部类型</option>
+                  {Object.entries(auditActionLabels).map(([value, label]) => (
+                    <option value={value} key={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>状态</span>
+                <select
+                  value={auditQuery.status ?? ''}
+                  onChange={(event) =>
+                    setAuditQuery((query) => ({
+                      ...query,
+                      status: event.target.value as AuditLogQuery['status'],
+                      offset: 0,
+                    }))
+                  }
+                >
+                  <option value="">全部状态</option>
+                  <option value="success">成功</option>
+                  <option value="failure">失败</option>
+                </select>
+              </label>
+              <label>
+                <span>开始时间</span>
+                <input
+                  type="datetime-local"
+                  step={1}
+                  value={auditQuery.startTime ?? ''}
+                  onChange={(event) => {
+                    setAuditTimeRangeLocked(true);
+                    setAuditQuery((query) => ({ ...query, startTime: event.target.value, offset: 0 }));
+                  }}
+                />
+              </label>
+              <label>
+                <span>结束时间</span>
+                <input
+                  type="datetime-local"
+                  step={1}
+                  value={auditQuery.endTime ?? ''}
+                  onChange={(event) => {
+                    setAuditTimeRangeLocked(true);
+                    setAuditQuery((query) => ({ ...query, endTime: event.target.value, offset: 0 }));
+                  }}
+                />
+              </label>
+              <label>
+                <span>关键词</span>
+                <input
+                  value={auditQuery.keyword ?? ''}
+                  onChange={(event) =>
+                    setAuditQuery((query) => ({ ...query, keyword: event.target.value, offset: 0 }))
+                  }
+                  placeholder="搜索摘要、工具、工作区或错误"
+                />
+              </label>
+              <div className="audit-filter-actions">
+                <button type="button" onClick={applyAuditFilters}>
+                  查询
+                </button>
+                <button type="button" className="quiet-button" onClick={resetAuditFilters}>
+                  重置
+                </button>
+              </div>
+            </div>
+            <div className="audit-list">
+              {auditEntries.length === 0 ? (
+                <p className="empty-state">暂无操作记录。</p>
+              ) : (
+                auditEntries.map((entry) => (
+                  <div className="audit-row" key={`${entry.timestamp}-${entry.businessAction}`}>
+                    <strong>{auditActionLabels[entry.businessAction] ?? entry.businessAction}</strong>
+                    <span>{new Date(entry.timestamp).toLocaleString('zh-CN')}</span>
+                    <p>{entry.outputSummary ?? entry.inputSummary ?? entry.toolName}</p>
+                    <small className={entry.status === 'success' ? 'enabled' : 'disabled'}>
+                      {entry.status === 'success' ? '成功' : '失败'}
+                    </small>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="audit-pagination">
+              <span>
+                已显示 {auditEntries.length} / {auditTotal} 条
+              </span>
+              {auditHasMore && (
+                <button type="button" className="secondary-button" onClick={loadMoreAuditLogs}>
+                  加载更多
+                </button>
+              )}
+            </div>
+          </article>
+        )}
       </section>
+
+      {agentEditor && draftConfig && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-label="编辑智能体">
+            <div className="panel-heading with-action">
+              <div>
+                <Bot size={20} />
+                <h3>{agentEditor.name ? `编辑智能体：${agentEditor.name}` : '新增智能体'}</h3>
+              </div>
+              <button type="button" className="modal-close-button" onClick={() => setAgentEditor(null)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <div className="model-form-layout">
+              <div className="form-section-heading wide-field">
+                <strong>基础信息</strong>
+                <span>智能体是会话入口，负责绑定模型、业务能力和子智能体。</span>
+              </div>
+              <label>
+                <span>智能体名称 *</span>
+                <input
+                  value={agentEditor.name}
+                  onChange={(event) => updateAgentEditor('name', event.target.value)}
+                  placeholder="例如 案件办理、合同审查、企业查询"
+                />
+              </label>
+              <label>
+                <span>类型</span>
+                <select
+                  value={agentEditor.type}
+                  onChange={(event) =>
+                    updateAgentEditor('type', event.target.value as AgentConfig['type'])
+                  }
+                >
+                  <option value="primary">主智能体</option>
+                  <option value="sub">子智能体</option>
+                </select>
+              </label>
+              <label>
+                <span>最大层级</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={3}
+                  value={agentEditor.maxDelegationDepth}
+                  onChange={(event) =>
+                    updateAgentEditor(
+                      'maxDelegationDepth',
+                      Math.min(Math.max(Number(event.target.value), 1), 3),
+                    )
+                  }
+                />
+              </label>
+              <label className="wide-field">
+                <span>描述</span>
+                <textarea
+                  value={agentEditor.description}
+                  onChange={(event) => updateAgentEditor('description', event.target.value)}
+                  rows={3}
+                  placeholder="描述这个智能体负责的业务场景和边界。"
+                />
+              </label>
+
+              {agentEditor.type === 'sub' && (
+                <div className="wide-field checklist-box">
+                  <strong>上级主智能体 / 可复用挂载点</strong>
+                  {draftConfig.agents.filter((agent) => agent.id !== agentEditor.id).map((agent) => (
+                    <label className="checkbox-row" key={agent.id}>
+                      <input
+                        type="checkbox"
+                        checked={agentEditor.parentAgentIds.includes(agent.id)}
+                        onChange={(event) => toggleAgentParent(agent.id, event.target.checked)}
+                      />
+                      <span>{agent.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              <div className="wide-field checklist-box">
+                <strong>可用模型 *</strong>
+                {draftConfig.model.models.length === 0 ? (
+                  <p className="empty-state">请先在模型配置中新增并测试模型。</p>
+                ) : (
+                  draftConfig.model.models.map((model) => (
+                    <label className="checkbox-row" key={model.id}>
+                      <input
+                        type="checkbox"
+                        checked={agentEditor.modelIds.includes(model.id)}
+                        disabled={!model.enabled || model.connectionStatus !== 'success'}
+                        onChange={(event) => toggleAgentModel(model.id, event.target.checked)}
+                      />
+                      <span>{formatModelName(model)}{model.enabled && model.connectionStatus === 'success' ? '' : '（未启用或未联通）'}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+
+              <label>
+                <span>默认模型</span>
+                <select
+                  value={agentEditor.defaultModelId ?? ''}
+                  onChange={(event) => updateAgentEditor('defaultModelId', event.target.value || null)}
+                >
+                  <option value="">请选择</option>
+                  {draftConfig.model.models
+                    .filter((model) => agentEditor.modelIds.includes(model.id))
+                    .map((model) => (
+                      <option value={model.id} key={model.id}>
+                        {formatModelName(model)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <div className="wide-field checklist-box">
+                <strong>可用 Tools / Skills</strong>
+                {draftConfig.capabilities.map((capability) => (
+                  <label className="checkbox-row" key={capability.id}>
+                    <input
+                      type="checkbox"
+                      checked={agentEditor.capabilityIds.includes(capability.id)}
+                      disabled={!capability.enabled}
+                      onChange={(event) => toggleAgentCapability(capability.id, event.target.checked)}
+                    />
+                    <span>{capability.name} / {capabilityTypeLabels[capability.type]}{capability.enabled ? '' : '（未启用）'}</span>
+                  </label>
+                ))}
+              </div>
+
+              {agentEditor.type === 'primary' && (
+                <div className="wide-field checklist-box">
+                  <strong>可调度子智能体</strong>
+                  {draftConfig.agents
+                    .filter((agent) => agent.type === 'sub' && agent.id !== agentEditor.id)
+                    .map((agent) => (
+                      <label className="checkbox-row" key={agent.id}>
+                        <input
+                          type="checkbox"
+                          checked={agentEditor.childAgentIds.includes(agent.id)}
+                          onChange={(event) => toggleAgentChild(agent.id, event.target.checked)}
+                        />
+                        <span>{agent.name}</span>
+                      </label>
+                    ))}
+                </div>
+              )}
+
+              <label className="checkbox-row form-checkbox">
+                <input
+                  type="checkbox"
+                  checked={agentEditor.enabled}
+                  onChange={(event) => updateAgentEditor('enabled', event.target.checked)}
+                />
+                <span>启用该智能体</span>
+              </label>
+              <label className="wide-field">
+                <span>备注</span>
+                <textarea
+                  value={agentEditor.notes}
+                  onChange={(event) => updateAgentEditor('notes', event.target.value)}
+                  rows={3}
+                />
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="quiet-button" onClick={() => deleteAgentConfig(agentEditor.id)}>
+                <Trash2 size={16} />
+                <span>删除</span>
+              </button>
+              <button type="button" onClick={() => saveAgentConfig(agentEditor)}>
+                <Save size={16} />
+                <span>保存智能体</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {modelEditor && (
         <div className="modal-backdrop" role="presentation">

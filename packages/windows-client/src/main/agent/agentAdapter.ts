@@ -72,7 +72,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			state: "idle",
 		};
 
-		const rpcProcess = await this.startRpcProcess(options);
+		const rpcProcess = await this.startRpcProcess(options, session.id);
 		const state: RpcProcessSession = {
 			process: rpcProcess,
 			session,
@@ -194,11 +194,11 @@ export class RpcAgentAdapter implements AgentAdapter {
 		];
 	}
 
-	private async startRpcProcess(options: AgentStartOptions): Promise<ChildProcessWithoutNullStreams> {
+	private async startRpcProcess(options: AgentStartOptions, sessionId: string): Promise<ChildProcessWithoutNullStreams> {
 		const projectRoot = this.findProjectRoot();
 		const sourceCli = join(projectRoot, "packages", "coding-agent", "src", "cli.ts");
 		const builtCli = join(projectRoot, "packages", "coding-agent", "dist", "cli.js");
-		const agentDir = this.getAgentDir(options);
+		const agentDir = this.getAgentDir(options, sessionId);
 		await this.writeModelsJson(options.model, agentDir);
 
 		const args = ["--mode", "rpc", "--no-session"];
@@ -248,10 +248,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 		return resolve(app.getAppPath(), "..", "..");
 	}
 
-	private getAgentDir(options: AgentStartOptions): string {
+	private getAgentDir(options: AgentStartOptions, sessionId: string): string {
 		return options.isolated
 			? join(app.getPath("userData"), "pi-runtime-tests", crypto.randomUUID())
-			: join(app.getPath("userData"), "pi-runtime");
+			: join(app.getPath("userData"), "pi-runtime", sessionId);
 	}
 
 	private async writeModelsJson(model: ModelProfileConfig | null, agentDir: string): Promise<void> {

@@ -19,34 +19,47 @@ export class AgentService {
 		private readonly configService: ConfigService,
 	) {}
 
-	async startSession(): Promise<AgentSession> {
+	async startSession(agentId?: string, workspacePath?: string | null): Promise<AgentSession> {
 		const [workspace, configState] = await Promise.all([
 			this.workspaceService.getWorkspace(),
 			this.configService.getConfig(),
 		]);
+		const agent =
+			configState.config.agents.find((item) => item.id === agentId && item.enabled) ??
+			configState.config.agents.find((item) => item.id === configState.config.defaultAgentId && item.enabled) ??
+			configState.config.agents.find((item) => item.enabled && item.type === "primary") ??
+			null;
+		if (!agent) {
+			throw new Error("请先在配置中心创建并启用一个主智能体。");
+		}
 		const model =
 			configState.config.model.models.find(
-				(profile) => profile.id === configState.config.model.defaultModelId && profile.enabled,
+				(profile) => profile.id === agent.defaultModelId && profile.enabled,
 			) ??
-			configState.config.model.models.find((profile) => profile.enabled) ??
+			configState.config.model.models.find((profile) => agent.modelIds.includes(profile.id) && profile.enabled) ??
 			null;
 		if (!model) {
-			throw new Error("请先在配置中心新增并启用一个大模型。");
+			throw new Error(`智能体“${agent.name}”没有可用模型，请先为它关联并启用一个已测试通过的大模型。`);
 		}
 		if (!model.provider || !model.modelId) {
 			throw new Error("当前启用的大模型缺少供应商或模型 ID，请回到模型配置补齐。");
 		}
 
-		const session = await this.adapter.startSession({
+		const startedSession = await this.adapter.startSession({
 			model,
-			cwd: workspace.path,
+			cwd: workspacePath ?? workspace.path,
 		});
+		const session: AgentSession = {
+			...startedSession,
+			agentId: agent.id,
+			agentName: agent.name,
+			modelId: model.id,
+			workspacePath: workspacePath ?? workspace.path,
+		};
 		await this.writeAudit({
 			sessionId: session.id,
 			businessAction: "start-agent-session",
-			outputSummary: `会话 ${session.id} 已启动。${
-				model ? `模型：${model.provider}/${model.modelId || model.displayName}` : "未指定模型。"
-			}`,
+			outputSummary: `会话 ${session.id} 已启动。智能体：${agent.name}；模型：${model.provider}/${model.modelId || model.displayName}；能力：${agent.capabilityIds.length} 个。`,
 			status: "success",
 		});
 		return session;

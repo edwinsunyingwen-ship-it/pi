@@ -14,8 +14,8 @@ export class WorkspaceFileService {
 		private readonly auditLogger: AuditLogger,
 	) {}
 
-	async listFiles(): Promise<WorkspaceFileListResult> {
-		const workspace = await this.workspaceService.getWorkspace();
+	async listFiles(workspaceOverridePath?: string | null): Promise<WorkspaceFileListResult> {
+		const workspace = workspaceOverridePath ? { path: workspaceOverridePath } : await this.workspaceService.getWorkspace();
 		if (!workspace.path) {
 			return { workspacePath: null, files: [] };
 		}
@@ -36,8 +36,8 @@ export class WorkspaceFileService {
 		return { workspacePath, files };
 	}
 
-	async readFile(relativePath: string): Promise<WorkspaceFileReadResult> {
-		const workspace = await this.workspaceService.getWorkspace();
+	async readFile(relativePath: string, workspaceOverridePath?: string | null): Promise<WorkspaceFileReadResult> {
+		const workspace = workspaceOverridePath ? { path: workspaceOverridePath } : await this.workspaceService.getWorkspace();
 		if (!workspace.path) {
 			throw new Error("请先选择工作区。");
 		}

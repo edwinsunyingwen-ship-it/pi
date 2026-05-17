@@ -36,6 +36,10 @@ export interface AgentSession {
 	id: string;
 	startedAt: string;
 	state: "idle" | "running" | "stopped";
+	agentId?: string;
+	agentName?: string;
+	modelId?: string;
+	workspacePath?: string | null;
 }
 
 export interface AgentToolInfo {
@@ -57,9 +61,21 @@ export interface ModelConnectionTestResult {
 	testedAt: string;
 }
 
+export interface AuditLogQuery {
+	startTime?: string;
+	endTime?: string;
+	limit?: number;
+	offset?: number;
+	businessAction?: string;
+	status?: AuditStatus | "";
+	keyword?: string;
+}
+
 export interface AuditLogListResult {
 	logFilePath: string | null;
 	entries: AuditLogEntry[];
+	total: number;
+	hasMore: boolean;
 }
 
 export interface WorkspaceFileInfo {
@@ -176,10 +192,29 @@ export interface CapabilityConfig {
 	notes: string;
 }
 
+export type AgentNodeType = "primary" | "sub";
+
+export interface AgentConfig {
+	id: string;
+	name: string;
+	description: string;
+	type: AgentNodeType;
+	parentAgentIds: string[];
+	childAgentIds: string[];
+	modelIds: string[];
+	defaultModelId: string | null;
+	capabilityIds: string[];
+	maxDelegationDepth: number;
+	enabled: boolean;
+	notes: string;
+}
+
 export interface ClientConfig {
 	agentCore: AgentCoreConfig;
 	model: ModelConfig;
 	capabilities: CapabilityConfig[];
+	agents: AgentConfig[];
+	defaultAgentId: string | null;
 	updatedAt: string;
 }
 
@@ -197,13 +232,15 @@ export interface WindowsClientApi {
 	testModelConfig: (model: ModelProfileConfig) => Promise<ModelConnectionTestResult>;
 	saveCapabilityConfig: (capability: CapabilityConfig) => Promise<ClientConfigState>;
 	deleteCapabilityConfig: (id: string) => Promise<ClientConfigState>;
+	saveAgentConfig: (agent: AgentConfig) => Promise<ClientConfigState>;
+	deleteAgentConfig: (id: string) => Promise<ClientConfigState>;
 	resetClientConfig: () => Promise<ClientConfigState>;
 	getWorkspace: () => Promise<WorkspaceState>;
 	chooseWorkspace: () => Promise<WorkspaceState>;
-	listAuditLogs: (limit?: number) => Promise<AuditLogListResult>;
-	listWorkspaceFiles: () => Promise<WorkspaceFileListResult>;
-	readWorkspaceFile: (relativePath: string) => Promise<WorkspaceFileReadResult>;
-	startAgentSession: () => Promise<AgentSession>;
+	listAuditLogs: (query?: AuditLogQuery) => Promise<AuditLogListResult>;
+	listWorkspaceFiles: (workspacePath?: string | null) => Promise<WorkspaceFileListResult>;
+	readWorkspaceFile: (relativePath: string, workspacePath?: string | null) => Promise<WorkspaceFileReadResult>;
+	startAgentSession: (agentId?: string, workspacePath?: string | null) => Promise<AgentSession>;
 	stopAgentSession: (sessionId: string) => Promise<AgentSession>;
 	getAgentSessionState: (sessionId: string) => Promise<AgentSession | null>;
 	sendAgentUserMessage: (sessionId: string, message: string) => Promise<AgentMessageResult>;

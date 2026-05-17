@@ -11,13 +11,17 @@ const api: WindowsClientApi = {
 	testModelConfig: (model) => ipcRenderer.invoke(IPC_CHANNELS.configTestModel, model),
 	saveCapabilityConfig: (capability) => ipcRenderer.invoke(IPC_CHANNELS.configSaveCapability, capability),
 	deleteCapabilityConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteCapability, id),
+	saveAgentConfig: (agent) => ipcRenderer.invoke(IPC_CHANNELS.configSaveAgent, agent),
+	deleteAgentConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteAgent, id),
 	resetClientConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configReset),
 	getWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.getWorkspace),
 	chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
-	listAuditLogs: (limit) => ipcRenderer.invoke(IPC_CHANNELS.auditListLogs, limit),
-	listWorkspaceFiles: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListFiles),
-	readWorkspaceFile: (relativePath) => ipcRenderer.invoke(IPC_CHANNELS.workspaceReadFile, relativePath),
-	startAgentSession: () => ipcRenderer.invoke(IPC_CHANNELS.agentStartSession),
+	listAuditLogs: (query) => ipcRenderer.invoke(IPC_CHANNELS.auditListLogs, query),
+	listWorkspaceFiles: (workspacePath) => ipcRenderer.invoke(IPC_CHANNELS.workspaceListFiles, workspacePath),
+	readWorkspaceFile: (relativePath, workspacePath) =>
+		ipcRenderer.invoke(IPC_CHANNELS.workspaceReadFile, relativePath, workspacePath),
+	startAgentSession: (agentId, workspacePath) =>
+		ipcRenderer.invoke(IPC_CHANNELS.agentStartSession, agentId, workspacePath),
 	stopAgentSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.agentStopSession, sessionId),
 	getAgentSessionState: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.agentGetSessionState, sessionId),
 	sendAgentUserMessage: (sessionId, message) =>

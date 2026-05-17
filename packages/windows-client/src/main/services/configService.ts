@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { app } from "electron";
 import type {
 	AgentCoreConfig,
+	AgentConfig,
 	CapabilityConfig,
 	ClientConfig,
 	ClientConfigState,
@@ -119,6 +120,52 @@ export class ConfigService {
 		return { configPath: this.configPath, config: nextConfig };
 	}
 
+	async saveAgentConfig(agent: AgentConfig): Promise<ClientConfigState> {
+		const current = await this.getConfig();
+		const exists = current.config.agents.some((item) => item.id === agent.id);
+		const sourceAgents = exists
+			? current.config.agents.map((item) => (item.id === agent.id ? agent : item))
+			: [...current.config.agents, agent];
+		const agents = this.normalizeAgents(sourceAgents, current.config.model.models, current.config.capabilities);
+		const normalizedAgent = agents.find((item) => item.id === agent.id) ?? agents[0];
+		if (!normalizedAgent) {
+			throw new Error("智能体配置不能为空。");
+		}
+		const nextConfig = this.mergeWithDefaults({
+			...current.config,
+			agents,
+			defaultAgentId: current.config.defaultAgentId ?? normalizedAgent.id,
+			updatedAt: new Date().toISOString(),
+		});
+
+		await this.writeConfig(nextConfig, true, "save-agent-config", `保存智能体配置：${normalizedAgent.name}。`);
+		return { configPath: this.configPath, config: nextConfig };
+	}
+
+	async deleteAgentConfig(id: string): Promise<ClientConfigState> {
+		const current = await this.getConfig();
+		const agent = current.config.agents.find((item) => item.id === id);
+		const agents = current.config.agents
+			.filter((item) => item.id !== id)
+			.map((item) => ({
+				...item,
+				parentAgentIds: item.parentAgentIds.filter((agentId) => agentId !== id),
+				childAgentIds: item.childAgentIds.filter((agentId) => agentId !== id),
+			}));
+		const nextConfig = this.mergeWithDefaults({
+			...current.config,
+			agents,
+			defaultAgentId:
+				current.config.defaultAgentId === id
+					? (agents.find((item) => item.enabled && item.type === "primary")?.id ?? agents[0]?.id ?? null)
+					: current.config.defaultAgentId,
+			updatedAt: new Date().toISOString(),
+		});
+
+		await this.writeConfig(nextConfig, true, "delete-agent-config", `删除智能体配置：${agent?.name ?? id}。`);
+		return { configPath: this.configPath, config: nextConfig };
+	}
+
 	async resetConfig(): Promise<ClientConfigState> {
 		const config = this.createDefaultConfig();
 		await this.writeConfig(config, true, "reset-client-config");
@@ -217,6 +264,23 @@ export class ConfigService {
 					notes: "",
 				},
 			],
+			agents: [
+				{
+					id: "default-agent",
+					name: "默认智能体",
+					description: "系统内置默认主智能体，可关联模型与业务能力后启动会话。",
+					type: "primary",
+					parentAgentIds: [],
+					childAgentIds: [],
+					modelIds: [],
+					defaultModelId: null,
+					capabilityIds: [],
+					maxDelegationDepth: 3,
+					enabled: true,
+					notes: "",
+				},
+			],
+			defaultAgentId: "default-agent",
 			updatedAt: new Date().toISOString(),
 		};
 	}
@@ -231,6 +295,13 @@ export class ConfigService {
 		};
 		const legacyEnterpriseApiBaseUrl = legacyConfig.enterpriseApiBaseUrl;
 
+		const model = this.normalizeModel(config.model, legacyConfig.modelProvider, defaultConfig.model);
+		const capabilities = this.normalizeCapabilities(
+			config.capabilities,
+			legacyEnterpriseApiBaseUrl,
+			defaultConfig.capabilities,
+		);
+		const agents = this.normalizeAgents(config.agents, model.models, capabilities);
 		return {
 			agentCore: this.normalizeAgentCore(
 				config.agentCore,
@@ -238,12 +309,13 @@ export class ConfigService {
 				legacyConfig.rpcEndpoint,
 				defaultConfig.agentCore,
 			),
-			model: this.normalizeModel(config.model, legacyConfig.modelProvider, defaultConfig.model),
-			capabilities: this.normalizeCapabilities(
-				config.capabilities,
-				legacyEnterpriseApiBaseUrl,
-				defaultConfig.capabilities,
-			),
+			model: this.applyModelUsage(model, agents),
+			capabilities: this.applyCapabilityUsage(capabilities, agents),
+			agents,
+			defaultAgentId:
+				config.defaultAgentId && agents.some((agent) => agent.id === config.defaultAgentId)
+					? config.defaultAgentId
+					: (agents.find((agent) => agent.enabled && agent.type === "primary")?.id ?? agents[0]?.id ?? null),
 			updatedAt: config.updatedAt ?? defaultConfig.updatedAt,
 		};
 	}
@@ -422,5 +494,77 @@ export class ConfigService {
 		}
 
 		return defaultCapabilities;
+	}
+
+	private normalizeAgents(
+		agents: AgentConfig[] | undefined,
+		models: ModelProfileConfig[],
+		capabilities: CapabilityConfig[],
+	): AgentConfig[] {
+		const modelIds = new Set(models.map((model) => model.id));
+		const capabilityIds = new Set(capabilities.map((capability) => capability.id));
+		const sourceAgents =
+			agents && agents.length > 0
+				? agents
+				: [
+						{
+							id: "default-agent",
+							name: "默认智能体",
+							description: "系统内置默认主智能体，可关联模型与业务能力后启动会话。",
+							type: "primary" as const,
+							parentAgentIds: [],
+							childAgentIds: [],
+							modelIds: models.filter((model) => model.enabled).map((model) => model.id),
+							defaultModelId: models.find((model) => model.enabled)?.id ?? models[0]?.id ?? null,
+							capabilityIds: capabilities.filter((capability) => capability.enabled).map((capability) => capability.id),
+							maxDelegationDepth: 3,
+							enabled: true,
+							notes: "",
+						},
+					];
+		const knownAgentIds = new Set(sourceAgents.map((agent) => agent.id || crypto.randomUUID()));
+
+		return sourceAgents.map((agent) => {
+			const validModelIds = (agent.modelIds ?? []).filter((modelId) => modelIds.has(modelId));
+			const validCapabilityIds = (agent.capabilityIds ?? []).filter((capabilityId) => capabilityIds.has(capabilityId));
+			const defaultModelId =
+				agent.defaultModelId && validModelIds.includes(agent.defaultModelId)
+					? agent.defaultModelId
+					: (validModelIds[0] ?? null);
+			const type = agent.type === "sub" ? "sub" : "primary";
+			return {
+				id: agent.id || crypto.randomUUID(),
+				name: agent.name || "未命名智能体",
+				description: agent.description ?? "",
+				type,
+				parentAgentIds: type === "sub" ? (agent.parentAgentIds ?? []).filter((id) => knownAgentIds.has(id)) : [],
+				childAgentIds: (agent.childAgentIds ?? []).filter((id) => knownAgentIds.has(id) && id !== agent.id),
+				modelIds: validModelIds,
+				defaultModelId,
+				capabilityIds: validCapabilityIds,
+				maxDelegationDepth: Math.min(Math.max(Number(agent.maxDelegationDepth ?? 3), 1), 3),
+				enabled: agent.enabled ?? true,
+				notes: agent.notes ?? "",
+			};
+		});
+	}
+
+	private applyModelUsage(model: ModelConfig, agents: AgentConfig[]): ModelConfig {
+		return {
+			...model,
+			models: model.models.map((profile) => ({
+				...profile,
+				usedByAgentIds: agents.filter((agent) => agent.modelIds.includes(profile.id)).map((agent) => agent.id),
+			})),
+		};
+	}
+
+	private applyCapabilityUsage(capabilities: CapabilityConfig[], agents: AgentConfig[]): CapabilityConfig[] {
+		return capabilities.map((capability) => ({
+			...capability,
+			usedByAgentIds: agents
+				.filter((agent) => agent.capabilityIds.includes(capability.id))
+				.map((agent) => agent.id),
+		}));
 	}
 }
