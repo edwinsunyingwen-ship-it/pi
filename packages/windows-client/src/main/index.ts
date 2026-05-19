@@ -2,8 +2,8 @@ import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
 import type {
-	AgentCoreConfig,
 	AgentConfig,
+	AgentCoreConfig,
 	AppEnvironment,
 	AuditLogQuery,
 	CapabilityConfig,
@@ -84,9 +84,7 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.configDeleteCapability, (_event, id: string) =>
 		configService.deleteCapabilityConfig(id),
 	);
-	ipcMain.handle(IPC_CHANNELS.configSaveAgent, (_event, agent: AgentConfig) =>
-		configService.saveAgentConfig(agent),
-	);
+	ipcMain.handle(IPC_CHANNELS.configSaveAgent, (_event, agent: AgentConfig) => configService.saveAgentConfig(agent));
 	ipcMain.handle(IPC_CHANNELS.configDeleteAgent, (_event, id: string) => configService.deleteAgentConfig(id));
 	ipcMain.handle(IPC_CHANNELS.configReset, () => configService.resetConfig());
 
@@ -104,9 +102,7 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.workspaceReadFile, (_event, relativePath: string, workspacePath?: string | null) =>
 		workspaceFileService.readFile(relativePath, workspacePath),
 	);
-	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, query?: AuditLogQuery) =>
-		auditLogger.listRecent(query),
-	);
+	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, query?: AuditLogQuery) => auditLogger.listRecent(query));
 
 	ipcMain.handle(IPC_CHANNELS.agentStartSession, (_event, agentId?: string, workspacePath?: string | null) =>
 		agentService.startSession(agentId, workspacePath),

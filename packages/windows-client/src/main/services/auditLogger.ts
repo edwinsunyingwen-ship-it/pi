@@ -93,13 +93,7 @@ export class AuditLogger {
 		return `${year}-${month}-${day}`;
 	}
 
-	private matchesQuery(
-		entry: AuditLogEntry,
-		start: Date,
-		end: Date,
-		query: AuditLogQuery,
-		keyword: string,
-	): boolean {
+	private matchesQuery(entry: AuditLogEntry, start: Date, end: Date, query: AuditLogQuery, keyword: string): boolean {
 		const timestamp = new Date(entry.timestamp);
 		if (Number.isNaN(timestamp.getTime()) || timestamp < start || timestamp > end) {
 			return false;

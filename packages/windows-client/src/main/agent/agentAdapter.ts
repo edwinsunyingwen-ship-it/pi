@@ -5,11 +5,18 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { app } from "electron";
-import type { AgentMessageResult, AgentSession, AgentToolInfo, ModelProfileConfig } from "../../shared/types";
+import type {
+	AgentCapabilityCallLog,
+	AgentMessageResult,
+	AgentSession,
+	AgentToolInfo,
+	ModelProfileConfig,
+} from "../../shared/types";
 
 export interface AgentStartOptions {
 	model: ModelProfileConfig | null;
 	cwd: string | null;
+	appendSystemPrompt?: string;
 	isolated?: boolean;
 }
 
@@ -24,15 +31,26 @@ type RpcResponse = {
 
 type RpcEvent = {
 	type: string;
+	toolCallId?: string;
+	toolName?: string;
+	args?: unknown;
+	input?: unknown;
+	result?: unknown;
+	partialResult?: unknown;
+	isError?: boolean;
 	messages?: Array<{
 		role?: string;
-		content?: string | Array<{ type?: string; text?: string }>;
+		content?: unknown;
+		toolCallId?: string;
+		toolName?: string;
 		stopReason?: string;
 		errorMessage?: string;
 	}>;
 	message?: {
 		role?: string;
-		content?: string | Array<{ type?: string; text?: string }>;
+		content?: unknown;
+		toolCallId?: string;
+		toolName?: string;
 		stopReason?: string;
 		errorMessage?: string;
 	};
@@ -152,6 +170,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			sessionId,
 			responseText: responseText.trim(),
 			createdAt: new Date().toISOString(),
+			capabilityCalls: this.extractCapabilityCalls(events),
 		};
 	}
 
@@ -194,7 +213,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 		];
 	}
 
-	private async startRpcProcess(options: AgentStartOptions, sessionId: string): Promise<ChildProcessWithoutNullStreams> {
+	private async startRpcProcess(
+		options: AgentStartOptions,
+		sessionId: string,
+	): Promise<ChildProcessWithoutNullStreams> {
 		const projectRoot = this.findProjectRoot();
 		const sourceCli = join(projectRoot, "packages", "coding-agent", "src", "cli.ts");
 		const builtCli = join(projectRoot, "packages", "coding-agent", "dist", "cli.js");
@@ -202,6 +224,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 		await this.writeModelsJson(options.model, agentDir);
 
 		const args = ["--mode", "rpc", "--no-session"];
+		const appendSystemPromptPath = await this.writeAppendSystemPrompt(options.appendSystemPrompt, agentDir);
+		if (appendSystemPromptPath) {
+			args.push("--append-system-prompt", appendSystemPromptPath);
+		}
 
 		const command = process.env.PI_WINDOWS_CLIENT_NODE_PATH || "node";
 		const commandArgs =
@@ -292,6 +318,17 @@ export class RpcAgentAdapter implements AgentAdapter {
 			JSON.stringify({ providers: { [model.provider]: providerConfig } }, null, 2),
 			"utf8",
 		);
+	}
+
+	private async writeAppendSystemPrompt(value: string | undefined, agentDir: string): Promise<string | null> {
+		if (!value?.trim()) {
+			return null;
+		}
+
+		await mkdir(agentDir, { recursive: true });
+		const appendPromptPath = join(agentDir, "windows-agent-context.md");
+		await writeFile(appendPromptPath, value.trim(), "utf8");
+		return appendPromptPath;
 	}
 
 	private parseJsonObject(value: string): Record<string, unknown> {
@@ -418,12 +455,130 @@ export class RpcAgentAdapter implements AgentAdapter {
 		}
 		if (Array.isArray(content)) {
 			return content
-				.filter((item) => item.type === "text" && item.text)
+				.filter(
+					(item): item is { type: "text"; text: string } =>
+						this.isRecord(item) && item.type === "text" && typeof item.text === "string",
+				)
 				.map((item) => item.text)
 				.join("\n")
 				.trim();
 		}
 		return "";
+	}
+
+	private extractCapabilityCalls(events: RpcEvent[]): AgentCapabilityCallLog[] {
+		const calls = new Map<string, AgentCapabilityCallLog>();
+		const orderedIds: string[] = [];
+
+		const ensureCall = (id: string, toolName: string): AgentCapabilityCallLog => {
+			const existing = calls.get(id);
+			if (existing) {
+				if (!existing.toolName && toolName) {
+					existing.toolName = toolName;
+				}
+				return existing;
+			}
+			const next: AgentCapabilityCallLog = {
+				toolCallId: id,
+				toolName: toolName || "unknown-tool",
+				status: "success",
+			};
+			calls.set(id, next);
+			orderedIds.push(id);
+			return next;
+		};
+
+		for (const event of events) {
+			if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
+				const call = ensureCall(event.toolCallId, event.toolName);
+				call.startedAt = call.startedAt ?? new Date().toISOString();
+				call.inputSummary = this.summarizeUnknown(event.args ?? event.input);
+				continue;
+			}
+
+			if (event.type === "tool_execution_update" && event.toolCallId && event.toolName) {
+				const call = ensureCall(event.toolCallId, event.toolName);
+				call.outputSummary = call.outputSummary ?? this.summarizeUnknown(event.partialResult);
+				continue;
+			}
+
+			if (event.type === "tool_execution_end" && event.toolCallId && event.toolName) {
+				const call = ensureCall(event.toolCallId, event.toolName);
+				call.endedAt = new Date().toISOString();
+				call.status = event.isError ? "failure" : "success";
+				call.outputSummary = this.summarizeUnknown(event.result);
+				continue;
+			}
+
+			if (event.type === "agent_end") {
+				this.extractToolCallsFromMessages(event.messages ?? [], ensureCall);
+			}
+		}
+
+		return orderedIds.map((id) => calls.get(id)).filter((call): call is AgentCapabilityCallLog => Boolean(call));
+	}
+
+	private extractToolCallsFromMessages(
+		messages: NonNullable<RpcEvent["messages"]>,
+		ensureCall: (id: string, toolName: string) => AgentCapabilityCallLog,
+	): void {
+		for (const message of messages) {
+			if (message.role === "assistant" && Array.isArray(message.content)) {
+				for (const item of message.content) {
+					if (!this.isRecord(item) || item.type !== "toolCall") {
+						continue;
+					}
+					const id = this.asString(item.id ?? item.toolCallId);
+					const name = this.asString(item.name ?? item.toolName);
+					if (!id || !name) {
+						continue;
+					}
+					const call = ensureCall(id, name);
+					call.inputSummary = call.inputSummary ?? this.summarizeUnknown(item.arguments ?? item.args ?? item.input);
+				}
+			}
+
+			if (message.role === "toolResult") {
+				const id = this.asString(message.toolCallId);
+				const name = this.asString(message.toolName) || "tool-result";
+				if (!id) {
+					continue;
+				}
+				const call = ensureCall(id, name);
+				call.outputSummary = call.outputSummary ?? this.summarizeUnknown(message.content);
+				call.status = "success";
+			}
+		}
+	}
+
+	private summarizeUnknown(value: unknown, maxLength = 500): string | undefined {
+		if (value === undefined || value === null) {
+			return undefined;
+		}
+
+		let text: string;
+		if (typeof value === "string") {
+			text = value;
+		} else {
+			try {
+				text = JSON.stringify(value);
+			} catch {
+				text = String(value);
+			}
+		}
+
+		const redacted = text
+			.replace(/("(?:api[_-]?key|token|authorization|password|secret)"\s*:\s*)"[^"]+"/gi, '$1"***"')
+			.replace(/(bearer\s+)[a-z0-9._-]+/gi, "$1***");
+		return redacted.length <= maxLength ? redacted : `${redacted.slice(0, maxLength - 3)}...`;
+	}
+
+	private isRecord(value: unknown): value is Record<string, unknown> {
+		return Boolean(value && typeof value === "object" && !Array.isArray(value));
+	}
+
+	private asString(value: unknown): string | undefined {
+		return typeof value === "string" && value.trim() ? value.trim() : undefined;
 	}
 
 	private extractAssistantError(events: RpcEvent[]): string | null {

@@ -19,7 +19,9 @@ import {
 } from 'lucide-react';
 import type {
   AgentConfig,
+  AgentRuleConfig,
   AgentSession,
+  AgentTaskTemplate,
   AgentToolInfo,
   AppEnvironment,
   AuditLogEntry,
@@ -77,6 +79,8 @@ const auditActionLabels: Record<string, string> = {
   'reset-client-config': '恢复默认配置',
   'agent-user-question': '用户提问',
   'agent-assistant-reply': 'Agent 回复',
+  'capability-invoked': '调用能力',
+  'capability-result': '能力返回',
   'test-model-connection': '模型联通测试',
   'save-agent-config': '保存智能体配置',
   'delete-agent-config': '删除智能体配置',
@@ -266,6 +270,11 @@ const setupModeLabels: Record<ModelSetupMode, string> = {
 const capabilityTypeLabels: Record<CapabilityConfig['type'], string> = {
   tool: 'Tool',
   skill: 'Skill',
+  mcp: 'MCP',
+  browser: '浏览器能力',
+  http: 'HTTP 接口',
+  command: '本地命令',
+  other: '其他',
 };
 
 const capabilityExecutionLabels: Record<CapabilityExecutionMode, string> = {
@@ -309,6 +318,8 @@ function createCapabilityConfig(): CapabilityConfig {
     type: 'tool',
     category: '',
     description: '',
+    content: '',
+    advancedConfig: '',
     triggerMode: 'agent',
     executionMode: 'http',
     endpoint: '',
@@ -335,6 +346,15 @@ function createAgentConfig(): AgentConfig {
     id: crypto.randomUUID(),
     name: '',
     description: '',
+    rules: {
+      role: '',
+      goals: '',
+      process: '',
+      outputFormat: '',
+      constraints: '',
+      terminology: '',
+    },
+    taskTemplates: [],
     type: 'primary',
     parentAgentIds: [],
     childAgentIds: [],
@@ -344,6 +364,17 @@ function createAgentConfig(): AgentConfig {
     maxDelegationDepth: 3,
     enabled: true,
     notes: '',
+  };
+}
+
+function createAgentTaskTemplate(): AgentTaskTemplate {
+  return {
+    id: crypto.randomUUID(),
+    name: '未命名常规任务',
+    description: '',
+    prompt: '',
+    expectedInputs: '',
+    enabled: true,
   };
 }
 
@@ -1076,12 +1107,12 @@ function App(): ReactElement {
       setStatusText('业务能力名称不能为空');
       return;
     }
-    if (capability.executionMode === 'http' && !capability.endpoint.trim()) {
-      setStatusText('HTTP 能力需要填写接口地址');
+    if (!capability.description.trim()) {
+      setStatusText('业务能力说明不能为空');
       return;
     }
-    if (capability.executionMode === 'command' && !capability.command.trim()) {
-      setStatusText('本地命令能力需要填写命令');
+    if (!capability.content.trim()) {
+      setStatusText('能力内容不能为空，请粘贴能力说明、配置片段或使用要求');
       return;
     }
 
@@ -1118,12 +1149,7 @@ function App(): ReactElement {
   }
 
   async function testCapabilityConnection(capability: CapabilityConfig): Promise<void> {
-    const hasTarget =
-      capability.executionMode === 'http'
-        ? Boolean(capability.endpoint.trim())
-        : capability.executionMode === 'command'
-          ? Boolean(capability.command.trim())
-          : true;
+    const hasTarget = Boolean(capability.content.trim() || capability.endpoint.trim() || capability.command.trim());
     const testedCapability: CapabilityConfig = {
       ...capability,
       connectionStatus: hasTarget ? 'success' : 'failure',
@@ -1224,6 +1250,58 @@ function App(): ReactElement {
 
   function updateAgentEditor<K extends keyof AgentConfig>(key: K, value: AgentConfig[K]): void {
     setAgentEditor((agent) => (agent ? { ...agent, [key]: value } : agent));
+  }
+
+  function updateAgentRule(key: keyof AgentRuleConfig, value: string): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            rules: {
+              ...agent.rules,
+              [key]: value,
+            },
+          }
+        : agent,
+    );
+  }
+
+  function updateAgentTaskTemplate(
+    templateId: string,
+    patch: Partial<AgentTaskTemplate>,
+  ): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            taskTemplates: agent.taskTemplates.map((template) =>
+              template.id === templateId ? { ...template, ...patch } : template,
+            ),
+          }
+        : agent,
+    );
+  }
+
+  function addAgentTaskTemplate(): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            taskTemplates: [...agent.taskTemplates, createAgentTaskTemplate()],
+          }
+        : agent,
+    );
+  }
+
+  function deleteAgentTaskTemplate(templateId: string): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            taskTemplates: agent.taskTemplates.filter((template) => template.id !== templateId),
+          }
+        : agent,
+    );
   }
 
   function toggleAgentModel(modelId: string, checked: boolean): void {
@@ -1464,11 +1542,63 @@ function App(): ReactElement {
     void sendMessage();
   }
 
+  function applyTaskTemplate(templateId: string): void {
+    const template = selectedAgentTaskTemplates.find((item) => item.id === templateId);
+    if (!template) {
+      return;
+    }
+    const parts = [
+      `常规任务：${template.name}`,
+      template.description ? `任务说明：${template.description}` : '',
+      template.expectedInputs ? `需要补充的信息或材料：${template.expectedInputs}` : '',
+      '',
+      template.prompt,
+    ].filter(Boolean);
+    saveCurrentConversation({
+      draftMessage: parts.join('\n'),
+      title: transcript.length === 0 ? template.name : sessionTitle,
+    });
+  }
+
   const canSend = Boolean(draftMessage.trim() && selectedAgent && !sessionStarting);
   const selectedAgentModel = draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId);
   const selectedAgentCapabilities = draftConfig?.capabilities.filter((capability) =>
     selectedAgent?.capabilityIds.includes(capability.id),
   ) ?? [];
+  const selectedAgentChildAgents = draftConfig?.agents.filter((agent) =>
+    selectedAgent?.childAgentIds.includes(agent.id),
+  ) ?? [];
+  const selectedAgentTaskTemplates = selectedAgent?.taskTemplates.filter((template) => template.enabled) ?? [];
+  const promptContextPreview = useMemo(() => {
+    const capabilityNames = selectedAgentCapabilities.map((capability) => capability.name).filter(Boolean);
+    const childAgentNames = selectedAgentChildAgents.map((agent) => agent.name).filter(Boolean);
+    const taskNames = selectedAgentTaskTemplates.map((template) => template.name).filter(Boolean);
+    return [
+      `智能体：${selectedAgent?.name ?? '未选择'}`,
+      `类型：${selectedAgent ? agentTypeLabels[selectedAgent.type] : '未选择'}`,
+      `描述：${selectedAgent?.description || '未填写'}`,
+      `角色定位：${selectedAgent?.rules.role || '未填写'}`,
+      `工作目标：${selectedAgent?.rules.goals || '未填写'}`,
+      `处理流程：${selectedAgent?.rules.process || '未填写'}`,
+      `输出格式：${selectedAgent?.rules.outputFormat || '未填写'}`,
+      `工作区：${activeWorkspace.path ?? '未选择'}`,
+      `默认模型：${formatModelName(selectedAgentModel)}`,
+      `绑定能力：${capabilityNames.length > 0 ? capabilityNames.join('、') : '未绑定'}`,
+      `子智能体：${childAgentNames.length > 0 ? childAgentNames.join('、') : '未配置'}`,
+      `常规任务：${taskNames.length > 0 ? taskNames.join('、') : '未配置'}`,
+      selectedFile ? `当前预览文件：${selectedFile.relativePath}` : '当前预览文件：未选择',
+      '项目指令：Pi 会根据当前工作区自动发现并读取 AGENTS.md、CLAUDE.md 等项目上下文文件。',
+      '说明：这里展示会补充到 Pi system prompt 的产品配置摘要；Tools / Skills 只有接入为 Pi 工具后才会被真实调用。',
+    ].join('\n');
+  }, [
+    activeWorkspace.path,
+    selectedAgent,
+    selectedAgentCapabilities,
+    selectedAgentChildAgents,
+    selectedAgentTaskTemplates,
+    selectedAgentModel,
+    selectedFile,
+  ]);
   const modelEditorPreset = modelEditor ? findProviderPreset(modelEditor.provider) : undefined;
   const modelEditorRequirements = modelEditor
     ? getProviderRequirements(modelEditor)
@@ -1686,6 +1816,21 @@ function App(): ReactElement {
                       <span>文件</span>
                     </button>
                   </div>
+                  {selectedAgentTaskTemplates.length > 0 && (
+                    <select
+                      className="task-template-select"
+                      value=""
+                      onChange={(event) => applyTaskTemplate(event.target.value)}
+                      aria-label="选择常规任务"
+                    >
+                      <option value="">选择常规任务</option>
+                      {selectedAgentTaskTemplates.map((template) => (
+                        <option value={template.id} key={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <textarea
                     value={draftMessage}
                     onChange={(event) => {
@@ -1725,6 +1870,10 @@ function App(): ReactElement {
                         ? '暂未绑定 Tools / Skills'
                         : selectedAgentCapabilities.map((capability) => capability.name).join('、')}
                     </span>
+                  </div>
+                  <div className="prompt-context-preview">
+                    <small>本次 Prompt 上下文预览</small>
+                    <pre>{promptContextPreview}</pre>
                   </div>
                   <div className="file-panel-actions">
                     <button type="button" className="quiet-button compact-button" onClick={() => refreshWorkspaceFiles()}>
@@ -2592,6 +2741,142 @@ function App(): ReactElement {
                 />
               </label>
 
+              <div className="form-section-heading wide-field">
+                <strong>智能体规则</strong>
+                <span>这些是长期生效的工作方法，不是单次任务说明；保存后会进入当前智能体的对话上下文。</span>
+              </div>
+              <label>
+                <span>角色定位</span>
+                <textarea
+                  value={agentEditor.rules.role}
+                  onChange={(event) => updateAgentRule('role', event.target.value)}
+                  rows={3}
+                  placeholder="例如：你是企业法务助手，擅长合同审查、案件材料梳理和风险提示。"
+                />
+              </label>
+              <label>
+                <span>工作目标</span>
+                <textarea
+                  value={agentEditor.rules.goals}
+                  onChange={(event) => updateAgentRule('goals', event.target.value)}
+                  rows={3}
+                  placeholder="例如：优先帮助用户发现风险、整理证据、形成可复用的审查结论。"
+                />
+              </label>
+              <label className="wide-field">
+                <span>处理流程</span>
+                <textarea
+                  value={agentEditor.rules.process}
+                  onChange={(event) => updateAgentRule('process', event.target.value)}
+                  rows={4}
+                  placeholder="例如：先确认材料范围，再提取关键信息，最后给出结论、依据和待补充事项。"
+                />
+              </label>
+              <label>
+                <span>输出格式</span>
+                <textarea
+                  value={agentEditor.rules.outputFormat}
+                  onChange={(event) => updateAgentRule('outputFormat', event.target.value)}
+                  rows={3}
+                  placeholder="例如：默认用结论摘要、风险清单、修改建议三段输出。"
+                />
+              </label>
+              <label>
+                <span>注意事项</span>
+                <textarea
+                  value={agentEditor.rules.constraints}
+                  onChange={(event) => updateAgentRule('constraints', event.target.value)}
+                  rows={3}
+                  placeholder="例如：不要编造未提供的事实；不确定时明确说明需要补充材料。"
+                />
+              </label>
+              <label className="wide-field">
+                <span>业务术语 / 偏好</span>
+                <textarea
+                  value={agentEditor.rules.terminology}
+                  onChange={(event) => updateAgentRule('terminology', event.target.value)}
+                  rows={3}
+                  placeholder="例如：公司内部把客户资料称为客户档案，把案件阶段称为立案、举证、庭审、执行。"
+                />
+              </label>
+
+              <div className="form-section-heading wide-field">
+                <strong>常规任务</strong>
+                <span>把某一类常见任务沉淀成快捷入口，使用时只需选择任务并补充材料。</span>
+                <button type="button" className="quiet-button compact-button" onClick={addAgentTaskTemplate}>
+                  <Plus size={16} />
+                  <span>新增常规任务</span>
+                </button>
+              </div>
+              <div className="wide-field task-template-editor-list">
+                {agentEditor.taskTemplates.length === 0 ? (
+                  <p className="empty-state">暂无常规任务，可以先把高频提示词沉淀成一个任务模板。</p>
+                ) : (
+                  agentEditor.taskTemplates.map((template) => (
+                    <div className="task-template-editor" key={template.id}>
+                      <div className="section-title-row compact-title">
+                        <strong>{template.name || '未命名常规任务'}</strong>
+                        <button
+                          type="button"
+                          className="quiet-button compact-button"
+                          onClick={() => deleteAgentTaskTemplate(template.id)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                      <label>
+                        <span>任务名称</span>
+                        <input
+                          value={template.name}
+                          onChange={(event) => updateAgentTaskTemplate(template.id, { name: event.target.value })}
+                          placeholder="例如 合同风险审查、案件材料摘要"
+                        />
+                      </label>
+                      <label>
+                        <span>任务说明</span>
+                        <input
+                          value={template.description}
+                          onChange={(event) =>
+                            updateAgentTaskTemplate(template.id, { description: event.target.value })
+                          }
+                          placeholder="说明这个任务适合什么时候使用"
+                        />
+                      </label>
+                      <label className="wide-field">
+                        <span>需要用户补充的信息或材料</span>
+                        <textarea
+                          value={template.expectedInputs}
+                          onChange={(event) =>
+                            updateAgentTaskTemplate(template.id, { expectedInputs: event.target.value })
+                          }
+                          rows={2}
+                          placeholder="例如：合同正文、对方主体名称、重点关注条款。"
+                        />
+                      </label>
+                      <label className="wide-field">
+                        <span>任务提示词 / 执行要求</span>
+                        <textarea
+                          value={template.prompt}
+                          onChange={(event) => updateAgentTaskTemplate(template.id, { prompt: event.target.value })}
+                          rows={4}
+                          placeholder="例如：请审查合同中的付款、违约、解除、管辖条款，输出风险等级、依据和修改建议。"
+                        />
+                      </label>
+                      <label className="checkbox-row form-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={template.enabled}
+                          onChange={(event) =>
+                            updateAgentTaskTemplate(template.id, { enabled: event.target.checked })
+                          }
+                        />
+                        <span>在对话框中显示这个任务</span>
+                      </label>
+                    </div>
+                  ))
+                )}
+              </div>
+
               {agentEditor.type === 'sub' && (
                 <div className="wide-field checklist-box">
                   <strong>上级主智能体 / 可复用挂载点</strong>
@@ -2954,25 +3239,21 @@ function App(): ReactElement {
               </button>
             </div>
 
-            <div className="settings-grid">
+            <div className="model-form-layout capability-editor-layout">
+              <div className="form-section-heading wide-field">
+                <strong>基础信息</strong>
+                <span>只保留必要字段；能力内容支持粘贴 Skill 文本、MCP 配置、curl、接口说明或同事分享的说明。</span>
+              </div>
               <label>
-                <span>能力名称</span>
+                <span>{requiredLabel('能力名称')}</span>
                 <input
                   value={capabilityEditor.name}
                   onChange={(event) => updateCapabilityEditor('name', event.target.value)}
-                  placeholder="例如 OCR 验证、合同条款检查"
+                  placeholder="例如 企业主体查询、合同风险审查"
                 />
               </label>
               <label>
-                <span>分类</span>
-                <input
-                  value={capabilityEditor.category}
-                  onChange={(event) => updateCapabilityEditor('category', event.target.value)}
-                  placeholder="例如 OCR、合同、财务、知识库"
-                />
-              </label>
-              <label>
-                <span>能力类型</span>
+                <span>{requiredLabel('能力类型')}</span>
                 <select
                   value={capabilityEditor.type}
                   onChange={(event) =>
@@ -2984,130 +3265,43 @@ function App(): ReactElement {
                   ))}
                 </select>
               </label>
-              <label>
-                <span>执行方式</span>
-                <select
-                  value={capabilityEditor.executionMode}
-                  onChange={(event) =>
-                    updateCapabilityEditor('executionMode', event.target.value as CapabilityExecutionMode)
-                  }
-                >
-                  {Object.entries(capabilityExecutionLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>触发方式</span>
-                <select
-                  value={capabilityEditor.triggerMode}
-                  onChange={(event) =>
-                    updateCapabilityEditor('triggerMode', event.target.value as CapabilityConfig['triggerMode'])
-                  }
-                >
-                  {Object.entries(capabilityTriggerLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>HTTP 方法</span>
-                <select
-                  value={capabilityEditor.httpMethod}
-                  onChange={(event) =>
-                    updateCapabilityEditor('httpMethod', event.target.value as CapabilityConfig['httpMethod'])
-                  }
-                >
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                  <option value="PUT">PUT</option>
-                  <option value="PATCH">PATCH</option>
-                  <option value="DELETE">DELETE</option>
-                </select>
-              </label>
               <label className="wide-field">
-                <span>接口地址</span>
-                <input
-                  value={capabilityEditor.endpoint}
-                  onChange={(event) => updateCapabilityEditor('endpoint', event.target.value)}
-                  placeholder="HTTP API / MCP endpoint，例如 https://api.company.local/ocr"
-                />
-              </label>
-              <label className="wide-field">
-                <span>本地命令</span>
-                <input
-                  value={capabilityEditor.command}
-                  onChange={(event) => updateCapabilityEditor('command', event.target.value)}
-                  placeholder="例如 scripts/verify-ocr.ps1"
-                />
-              </label>
-              <label>
-                <span>工作目录</span>
-                <input
-                  value={capabilityEditor.workingDirectory}
-                  onChange={(event) => updateCapabilityEditor('workingDirectory', event.target.value)}
-                  placeholder="可选，默认工作区"
-                />
-              </label>
-              <label>
-                <span>Token 环境变量</span>
-                <input
-                  value={capabilityEditor.tokenEnv}
-                  onChange={(event) => updateCapabilityEditor('tokenEnv', event.target.value)}
-                  placeholder="例如 OCR_API_TOKEN"
-                />
-              </label>
-              <label>
-                <span>超时 ms</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={capabilityEditor.timeoutMs}
-                  onChange={(event) => updateCapabilityEditor('timeoutMs', Number(event.target.value))}
-                />
-              </label>
-              <label>
-                <span>重试次数</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={capabilityEditor.retryCount}
-                  onChange={(event) => updateCapabilityEditor('retryCount', Number(event.target.value))}
-                />
-              </label>
-              <label className="wide-field">
-                <span>能力描述</span>
+                <span>{requiredLabel('能力说明')}</span>
                 <textarea
                   value={capabilityEditor.description}
                   onChange={(event) => updateCapabilityEditor('description', event.target.value)}
                   rows={3}
-                  placeholder="描述智能体什么时候应该调用这个能力。"
+                  placeholder="用业务语言描述：智能体在什么情况下应该参考或使用这个能力。"
                 />
               </label>
               <label className="wide-field">
-                <span>请求头 JSON</span>
+                <span>{requiredLabel('能力内容')}</span>
                 <textarea
-                  value={capabilityEditor.headersJson}
-                  onChange={(event) => updateCapabilityEditor('headersJson', event.target.value)}
-                  rows={3}
-                  placeholder='例如 {"X-System":"contract"}'
+                  className="capability-content-editor"
+                  value={capabilityEditor.content}
+                  onChange={(event) => updateCapabilityEditor('content', event.target.value)}
+                  rows={14}
+                  placeholder={`可以直接粘贴任意来源的能力内容，例如：
+- 同事分享的 Skill 使用说明
+- MCP 服务配置片段
+- 企业接口文档或 curl 示例
+- 本地脚本路径和参数说明
+- 浏览器操作要求
+
+第一期不会自动解析，只会原样保存并作为智能体理解能力的上下文。`}
                 />
               </label>
-              <label className="wide-field">
-                <span>输入 Schema JSON</span>
-                <textarea
-                  value={capabilityEditor.inputSchemaJson}
-                  onChange={(event) => updateCapabilityEditor('inputSchemaJson', event.target.value)}
-                  rows={4}
-                  placeholder='可选，用于描述 tool 参数，例如 {"type":"object","properties":{}}'
-                />
-              </label>
-              <label className="wide-field">
-                <span>输出 Schema JSON</span>
-                <textarea
-                  value={capabilityEditor.outputSchemaJson}
-                  onChange={(event) => updateCapabilityEditor('outputSchemaJson', event.target.value)}
-                  rows={4}
+
+              <div className="form-section-heading wide-field">
+                <strong>管理信息</strong>
+                <span>用于列表筛选、智能体绑定和后续治理；不影响能力内容本身。</span>
+              </div>
+              <label>
+                <span>分类</span>
+                <input
+                  value={capabilityEditor.category}
+                  onChange={(event) => updateCapabilityEditor('category', event.target.value)}
+                  placeholder="例如 OCR、合同、财务、知识库"
                 />
               </label>
               <label>
@@ -3134,14 +3328,71 @@ function App(): ReactElement {
                 />
                 <span>启用该能力</span>
               </label>
-              <label className="wide-field">
-                <span>备注</span>
-                <textarea
-                  value={capabilityEditor.notes}
-                  onChange={(event) => updateCapabilityEditor('notes', event.target.value)}
-                  rows={3}
-                />
-              </label>
+
+              <details className="wide-field advanced-capability-box">
+                <summary>高级配置（可选）</summary>
+                <div className="settings-grid">
+                  <label>
+                    <span>执行方式</span>
+                    <select
+                      value={capabilityEditor.executionMode}
+                      onChange={(event) =>
+                        updateCapabilityEditor('executionMode', event.target.value as CapabilityExecutionMode)
+                      }
+                    >
+                      {Object.entries(capabilityExecutionLabels).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>触发方式</span>
+                    <select
+                      value={capabilityEditor.triggerMode}
+                      onChange={(event) =>
+                        updateCapabilityEditor('triggerMode', event.target.value as CapabilityConfig['triggerMode'])
+                      }
+                    >
+                      {Object.entries(capabilityTriggerLabels).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="wide-field">
+                    <span>高级配置文本</span>
+                    <textarea
+                      value={capabilityEditor.advancedConfig}
+                      onChange={(event) => updateCapabilityEditor('advancedConfig', event.target.value)}
+                      rows={8}
+                      placeholder="可选：粘贴 JSON、YAML、MCP server config、参数映射、安全说明或测试说明。"
+                    />
+                  </label>
+                  <label className="wide-field">
+                    <span>接口地址 / 服务地址</span>
+                    <input
+                      value={capabilityEditor.endpoint}
+                      onChange={(event) => updateCapabilityEditor('endpoint', event.target.value)}
+                      placeholder="可选，未来真实执行时使用"
+                    />
+                  </label>
+                  <label className="wide-field">
+                    <span>本地命令</span>
+                    <input
+                      value={capabilityEditor.command}
+                      onChange={(event) => updateCapabilityEditor('command', event.target.value)}
+                      placeholder="可选，未来真实执行时使用"
+                    />
+                  </label>
+                  <label className="wide-field">
+                    <span>备注</span>
+                    <textarea
+                      value={capabilityEditor.notes}
+                      onChange={(event) => updateCapabilityEditor('notes', event.target.value)}
+                      rows={3}
+                    />
+                  </label>
+                </div>
+              </details>
             </div>
 
             <div className="modal-actions">

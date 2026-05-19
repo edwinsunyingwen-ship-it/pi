@@ -52,6 +52,18 @@ export interface AgentMessageResult {
 	sessionId: string;
 	responseText: string;
 	createdAt: string;
+	capabilityCalls?: AgentCapabilityCallLog[];
+}
+
+export interface AgentCapabilityCallLog {
+	toolCallId?: string;
+	toolName: string;
+	inputSummary?: string;
+	outputSummary?: string;
+	status: AuditStatus;
+	startedAt?: string;
+	endedAt?: string;
+	durationMs?: number;
 }
 
 export interface ModelConnectionTestResult {
@@ -161,7 +173,7 @@ export interface ModelConfig {
 	models: ModelProfileConfig[];
 }
 
-export type CapabilityType = "tool" | "skill";
+export type CapabilityType = "tool" | "skill" | "mcp" | "browser" | "http" | "command" | "other";
 export type CapabilityExecutionMode = "http" | "command" | "builtin" | "mcp" | "manual";
 export type CapabilityTriggerMode = "agent" | "manual" | "workflow" | "agent-and-workflow";
 export type CapabilityConnectionStatus = "unknown" | "untested" | "success" | "failure";
@@ -172,6 +184,8 @@ export interface CapabilityConfig {
 	type: CapabilityType;
 	category: string;
 	description: string;
+	content: string;
+	advancedConfig: string;
 	triggerMode: CapabilityTriggerMode;
 	executionMode: CapabilityExecutionMode;
 	endpoint: string;
@@ -194,10 +208,30 @@ export interface CapabilityConfig {
 
 export type AgentNodeType = "primary" | "sub";
 
+export interface AgentRuleConfig {
+	role: string;
+	goals: string;
+	process: string;
+	outputFormat: string;
+	constraints: string;
+	terminology: string;
+}
+
+export interface AgentTaskTemplate {
+	id: string;
+	name: string;
+	description: string;
+	prompt: string;
+	expectedInputs: string;
+	enabled: boolean;
+}
+
 export interface AgentConfig {
 	id: string;
 	name: string;
 	description: string;
+	rules: AgentRuleConfig;
+	taskTemplates: AgentTaskTemplate[];
 	type: AgentNodeType;
 	parentAgentIds: string[];
 	childAgentIds: string[];

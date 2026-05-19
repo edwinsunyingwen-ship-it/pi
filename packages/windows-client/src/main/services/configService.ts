@@ -3,8 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
 import type {
-	AgentCoreConfig,
 	AgentConfig,
+	AgentCoreConfig,
 	CapabilityConfig,
 	ClientConfig,
 	ClientConfigState,
@@ -244,6 +244,8 @@ export class ConfigService {
 					type: "tool",
 					category: "OCR",
 					description: "用于调用 OCR 验证服务或脚本。",
+					content: "",
+					advancedConfig: "",
 					triggerMode: "agent",
 					executionMode: "http",
 					endpoint: "",
@@ -269,6 +271,8 @@ export class ConfigService {
 					id: "default-agent",
 					name: "默认智能体",
 					description: "系统内置默认主智能体，可关联模型与业务能力后启动会话。",
+					rules: this.createDefaultAgentRules(),
+					taskTemplates: [],
 					type: "primary",
 					parentAgentIds: [],
 					childAgentIds: [],
@@ -441,6 +445,8 @@ export class ConfigService {
 				type: capability.type ?? "tool",
 				category: capability.category ?? "",
 				description: capability.description ?? "",
+				content: capability.content ?? "",
+				advancedConfig: capability.advancedConfig ?? "",
 				triggerMode: capability.triggerMode ?? "agent",
 				executionMode:
 					capability.executionMode ?? (capability.endpoint ? "http" : capability.command ? "command" : "manual"),
@@ -471,6 +477,8 @@ export class ConfigService {
 					type: "tool",
 					category: "企业接口",
 					description: "由旧版企业 API 地址迁移而来。",
+					content: legacyEnterpriseApiBaseUrl,
+					advancedConfig: "",
 					triggerMode: "agent",
 					executionMode: "http",
 					endpoint: legacyEnterpriseApiBaseUrl,
@@ -511,12 +519,16 @@ export class ConfigService {
 							id: "default-agent",
 							name: "默认智能体",
 							description: "系统内置默认主智能体，可关联模型与业务能力后启动会话。",
+							rules: this.createDefaultAgentRules(),
+							taskTemplates: [],
 							type: "primary" as const,
 							parentAgentIds: [],
 							childAgentIds: [],
 							modelIds: models.filter((model) => model.enabled).map((model) => model.id),
 							defaultModelId: models.find((model) => model.enabled)?.id ?? models[0]?.id ?? null,
-							capabilityIds: capabilities.filter((capability) => capability.enabled).map((capability) => capability.id),
+							capabilityIds: capabilities
+								.filter((capability) => capability.enabled)
+								.map((capability) => capability.id),
 							maxDelegationDepth: 3,
 							enabled: true,
 							notes: "",
@@ -526,7 +538,9 @@ export class ConfigService {
 
 		return sourceAgents.map((agent) => {
 			const validModelIds = (agent.modelIds ?? []).filter((modelId) => modelIds.has(modelId));
-			const validCapabilityIds = (agent.capabilityIds ?? []).filter((capabilityId) => capabilityIds.has(capabilityId));
+			const validCapabilityIds = (agent.capabilityIds ?? []).filter((capabilityId) =>
+				capabilityIds.has(capabilityId),
+			);
 			const defaultModelId =
 				agent.defaultModelId && validModelIds.includes(agent.defaultModelId)
 					? agent.defaultModelId
@@ -536,6 +550,18 @@ export class ConfigService {
 				id: agent.id || crypto.randomUUID(),
 				name: agent.name || "未命名智能体",
 				description: agent.description ?? "",
+				rules: {
+					...this.createDefaultAgentRules(),
+					...(agent.rules ?? {}),
+				},
+				taskTemplates: (agent.taskTemplates ?? []).map((template) => ({
+					id: template.id || crypto.randomUUID(),
+					name: template.name || "未命名常规任务",
+					description: template.description ?? "",
+					prompt: template.prompt ?? "",
+					expectedInputs: template.expectedInputs ?? "",
+					enabled: template.enabled ?? true,
+				})),
 				type,
 				parentAgentIds: type === "sub" ? (agent.parentAgentIds ?? []).filter((id) => knownAgentIds.has(id)) : [],
 				childAgentIds: (agent.childAgentIds ?? []).filter((id) => knownAgentIds.has(id) && id !== agent.id),
@@ -547,6 +573,17 @@ export class ConfigService {
 				notes: agent.notes ?? "",
 			};
 		});
+	}
+
+	private createDefaultAgentRules() {
+		return {
+			role: "",
+			goals: "",
+			process: "",
+			outputFormat: "",
+			constraints: "",
+			terminology: "",
+		};
 	}
 
 	private applyModelUsage(model: ModelConfig, agents: AgentConfig[]): ModelConfig {
@@ -562,9 +599,7 @@ export class ConfigService {
 	private applyCapabilityUsage(capabilities: CapabilityConfig[], agents: AgentConfig[]): CapabilityConfig[] {
 		return capabilities.map((capability) => ({
 			...capability,
-			usedByAgentIds: agents
-				.filter((agent) => agent.capabilityIds.includes(capability.id))
-				.map((agent) => agent.id),
+			usedByAgentIds: agents.filter((agent) => agent.capabilityIds.includes(capability.id)).map((agent) => agent.id),
 		}));
 	}
 }
