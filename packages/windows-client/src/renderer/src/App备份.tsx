@@ -11,7 +11,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Search,
   Send,
   Settings,
   ShieldCheck,
@@ -37,8 +36,6 @@ import type {
   WorkspaceFileInfo,
   WorkspaceState,
 } from '../../shared/types';
-import { highlightSearchText, searchConversations } from './conversation-search';
-import type { ConversationSearchMatch, SearchableConversation } from './conversation-search';
 import './styles.css';
 
 interface TranscriptItem {
@@ -61,14 +58,6 @@ interface AgentConversationState {
   transcript: TranscriptItem[];
   draftMessage: string;
   workspace: WorkspaceState;
-}
-
-interface SearchNavigationTarget {
-  matchId: string;
-  agentId: string;
-  conversationId: string;
-  messageIndex: number;
-  query: string;
 }
 
 const auditPageSize = 100;
@@ -323,49 +312,24 @@ function createCapabilityId(): string {
 }
 
 function createCapabilityConfig(): CapabilityConfig {
-  const createdAt = new Date().toISOString();
   return {
     id: createCapabilityId(),
-    createdAt,
-    updatedAt: createdAt,
     name: '未命名能力',
     type: 'tool',
-    toolName: '',
     category: '',
     description: '',
-    useWhen: '',
-    avoidWhen: '',
     content: '',
     advancedConfig: '',
     triggerMode: 'agent',
     executionMode: 'http',
     endpoint: '',
     httpMethod: 'POST',
-    httpBodyType: 'json',
-    httpContentType: 'application/json',
-    httpQueryParamsJson: '',
-    httpAuthType: 'none',
-    httpAuthHeaderName: 'Authorization',
-    httpAuthTokenEnv: '',
-    httpAuthTokenValue: '',
     command: '',
-    mcpServerName: '',
-    mcpUrl: '',
-    mcpTransport: 'stream-http',
-    mcpAuthType: 'none',
-    mcpApiKeyValue: '',
-    mcpHeadersJson: '',
-    mcpTools: [],
-    browserMode: 'builtin',
     workingDirectory: '',
     tokenEnv: '',
     headersJson: '',
     inputSchemaJson: '',
     outputSchemaJson: '',
-    resultFormat: 'text',
-    resultMapping: '',
-    costPolicy: 'free',
-    requiresConfirmation: false,
     timeoutMs: 600000,
     retryCount: 1,
     enabled: true,
@@ -520,33 +484,6 @@ function formatDateTimeInput(date: Date): string {
   return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
 }
 
-function formatLocalTimestamp(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
-}
-
-function getMessageAnchorId(conversationId: string, messageIndex: number): string {
-  return `${conversationId}:${messageIndex}`;
-}
-
-function renderHighlightedText(text: string, query: string): ReactElement {
-  const segments = highlightSearchText(text, query);
-
-  return (
-    <>
-      {segments.map((segment, index) =>
-        segment.matched ? (
-          <mark className="search-highlight" key={`${segment.text}-${index}`}>
-            {segment.text}
-          </mark>
-        ) : (
-          <span key={`${segment.text}-${index}`}>{segment.text}</span>
-        ),
-      )}
-    </>
-  );
-}
-
 function createDefaultAuditQuery(): AuditLogQuery {
   const end = new Date();
   const start = new Date(end);
@@ -597,19 +534,15 @@ function App(): ReactElement {
   const [agentNotice, setAgentNotice] = useState<LocalNotice | null>(null);
   const [configNotice, setConfigNotice] = useState<LocalNotice | null>(null);
   const [modelEditorNotice, setModelEditorNotice] = useState<LocalNotice | null>(null);
-  const [activeSection, setActiveSection] = useState<'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs' | 'billing'>(
+  const [activeSection, setActiveSection] = useState<'workbench' | 'workspace' | 'agent' | 'config' | 'logs'>(
     'workbench',
   );
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [conversationRevision, setConversationRevision] = useState(0);
   const [startingConversationId, setStartingConversationId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchAgentId, setSearchAgentId] = useState('');
-  const [searchNavigationTarget, setSearchNavigationTarget] = useState<SearchNavigationTarget | null>(null);
   const agentConversationsRef = useRef<Record<string, AgentConversationState[]>>({});
   const activeConversationIdsRef = useRef<Record<string, string>>({});
   const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
-  const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities'>(
     'models',
   );
@@ -699,56 +632,6 @@ function App(): ReactElement {
     [draftConfig?.agents],
   );
 
-  const searchableConversations = useMemo<SearchableConversation[]>(() => {
-    const agentNameById = new Map((draftConfig?.agents ?? []).map((agent) => [agent.id, agent.name]));
-    return Object.entries(agentConversationsRef.current).flatMap(([agentId, conversations]) =>
-      conversations.map((conversation) => ({
-        agentId,
-        agentName: agentNameById.get(agentId) ?? '未命名智能体',
-        conversationId: conversation.id,
-        conversationTitle: conversation.title,
-        updatedAt: conversation.updatedAt,
-        transcript: conversation.transcript.map((item) => ({ ...item })),
-      })),
-    );
-  }, [draftConfig?.agents, conversationRevision]);
-
-  const searchableAgentOptions = useMemo(() => {
-    const agentSummaries = new Map<string, { id: string; name: string; conversationCount: number }>();
-    for (const conversation of searchableConversations) {
-      const existing = agentSummaries.get(conversation.agentId);
-      if (existing) {
-        existing.conversationCount += 1;
-        continue;
-      }
-      agentSummaries.set(conversation.agentId, {
-        id: conversation.agentId,
-        name: conversation.agentName,
-        conversationCount: 1,
-      });
-    }
-    return [...agentSummaries.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
-  }, [searchableConversations]);
-
-  const filteredSearchConversations = useMemo(
-    () =>
-      searchAgentId
-        ? searchableConversations.filter((conversation) => conversation.agentId === searchAgentId)
-        : searchableConversations,
-    [searchAgentId, searchableConversations],
-  );
-
-  const searchResults = useMemo(
-    () => searchConversations(searchQuery, filteredSearchConversations),
-    [filteredSearchConversations, searchQuery],
-  );
-
-  useEffect(() => {
-    if (searchAgentId && !searchableAgentOptions.some((agent) => agent.id === searchAgentId)) {
-      setSearchAgentId('');
-    }
-  }, [searchAgentId, searchableAgentOptions]);
-
   const selectedAgent = useMemo(() => {
     const agents = draftConfig?.agents ?? [];
     return (
@@ -808,24 +691,6 @@ function App(): ReactElement {
 
     void startSession({ silent: true });
   }, [selectedAgent?.id, selectedConversation.id, sessionReady, sessionStarting]);
-
-  useEffect(() => {
-    if (
-      !searchNavigationTarget ||
-      activeSection !== 'workbench' ||
-      searchNavigationTarget.conversationId !== selectedConversation.id
-    ) {
-      return;
-    }
-
-    const anchorId = getMessageAnchorId(searchNavigationTarget.conversationId, searchNavigationTarget.messageIndex);
-    const timer = window.setTimeout(() => {
-      const targetElement = messageElementRefs.current[anchorId];
-      targetElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [activeSection, searchNavigationTarget, selectedConversation.id, transcript.length]);
 
   function commitAgentConversation(agentId: string, conversation: AgentConversationState): void {
     const nextConversation = {
@@ -895,25 +760,6 @@ function App(): ReactElement {
       [selectedAgent.id]: conversationId,
     };
     setAgentNotice(null);
-    setConversationRevision((revision) => revision + 1);
-  }
-
-  function openSearchResult(match: ConversationSearchMatch): void {
-    activeConversationIdsRef.current = {
-      ...activeConversationIdsRef.current,
-      [match.agentId]: match.conversationId,
-    };
-    selectedAgentIdRef.current = match.agentId;
-    setSelectedAgentId(match.agentId);
-    setSearchNavigationTarget({
-      matchId: match.id,
-      agentId: match.agentId,
-      conversationId: match.conversationId,
-      messageIndex: match.messageIndex,
-      query: searchQuery,
-    });
-    setAgentNotice(null);
-    setActiveSection('workbench');
     setConversationRevision((revision) => revision + 1);
   }
 
@@ -1402,44 +1248,6 @@ function App(): ReactElement {
     setCapabilityEditor((capability) => (capability ? { ...capability, [key]: value } : capability));
   }
 
-  function applyCapabilityType(type: CapabilityConfig['type']): void {
-    const defaultExecutionModeByType: Record<CapabilityConfig['type'], CapabilityExecutionMode> = {
-      tool: 'builtin',
-      skill: 'manual',
-      mcp: 'mcp',
-      browser: 'builtin',
-      http: 'http',
-      command: 'command',
-      other: 'manual',
-    };
-    setCapabilityEditor((capability) =>
-      capability
-        ? {
-            ...capability,
-            type,
-            executionMode: defaultExecutionModeByType[type],
-          }
-        : capability,
-    );
-  }
-
-  async function discoverMcpTools(capability: CapabilityConfig): Promise<void> {
-    setStatusText(`正在发现 MCP 工具：${capability.name || capability.mcpServerName || capability.mcpUrl}`);
-    const result = await window.windowsClient.discoverMcpTools(capability);
-    setCapabilityEditor((current) =>
-      current && current.id === capability.id
-        ? {
-            ...current,
-            mcpTools: result.tools,
-            connectionStatus: result.status,
-            lastTestedAt: new Date().toISOString(),
-          }
-        : current,
-    );
-    setConfigNotice({ tone: result.status === 'success' ? 'success' : 'error', text: result.message });
-    setStatusText(result.message);
-  }
-
   function updateAgentEditor<K extends keyof AgentConfig>(key: K, value: AgentConfig[K]): void {
     setAgentEditor((agent) => (agent ? { ...agent, [key]: value } : agent));
   }
@@ -1803,77 +1611,9 @@ function App(): ReactElement {
         : ''
     : '';
   const modelSuggestions = modelEditorPreset?.models ?? [];
-  const activeSearchScopeName = searchAgentId
-    ? searchableAgentOptions.find((agent) => agent.id === searchAgentId)?.name ?? '当前智能体'
-    : '全部智能体';
 
   return (
     <main className="app-shell">
-      <aside className="global-sidebar" aria-label="司南导航">
-        <div className="sidebar-brand">
-          <span className="brand-mark">司</span>
-          <strong>司南</strong>
-        </div>
-
-        <div className="sidebar-actions">
-          <button type="button" onClick={createNewConversation} disabled={!selectedAgent}>
-            <Plus size={16} />
-            <span>新对话</span>
-          </button>
-          <button
-            type="button"
-            className={activeSection === 'search' ? 'active' : ''}
-            onClick={() => setActiveSection('search')}
-          >
-            <Search size={16} />
-            <span>搜索</span>
-          </button>
-          <button
-            type="button"
-            className={activeSection === 'logs' ? 'active' : ''}
-            onClick={() => setActiveSection('logs')}
-          >
-            <ListChecks size={16} />
-            <span>运行日志</span>
-          </button>
-          <button
-            type="button"
-            className={activeSection === 'billing' ? 'active' : ''}
-            onClick={() => setActiveSection('billing')}
-          >
-            <FileText size={16} />
-            <span>消费明细</span>
-          </button>
-        </div>
-
-        <div className="sidebar-section-title">历史会话</div>
-        <div className="sidebar-conversations">
-          {selectedAgentConversations.length === 0 ? (
-            <p className="sidebar-empty">当前智能体暂无历史会话</p>
-          ) : (
-            selectedAgentConversations.map((conversation) => (
-              <button
-                type="button"
-                className={`sidebar-thread ${conversation.id === selectedConversation.id ? 'active' : ''}`}
-                key={conversation.id}
-                onClick={() => {
-                  selectConversation(conversation.id);
-                  setActiveSection('workbench');
-                }}
-              >
-                <span>{conversation.title || '新会话'}</span>
-                <small>{formatLocalTimestamp(conversation.updatedAt)}</small>
-              </button>
-            ))
-          )}
-        </div>
-
-        <button type="button" className="sidebar-settings" onClick={() => setActiveSection('config')}>
-          <Settings size={16} />
-          <span>设置</span>
-        </button>
-      </aside>
-
       <header className="top-bar">
         <div>
           <p className="eyebrow">Windows 客户端</p>
@@ -1895,13 +1635,6 @@ function App(): ReactElement {
         </button>
         <button
           type="button"
-          className={activeSection === 'search' ? 'active' : ''}
-          onClick={() => setActiveSection('search')}
-        >
-          搜索
-        </button>
-        <button
-          type="button"
           className={activeSection === 'config' ? 'active' : ''}
           onClick={() => setActiveSection('config')}
         >
@@ -1917,82 +1650,6 @@ function App(): ReactElement {
       </nav>
 
       <section className="dashboard-grid">
-        {activeSection === 'search' && (
-          <article className="panel wide-panel search-panel">
-            <div className="panel-heading">
-              <Search size={20} />
-              <h3>搜索</h3>
-            </div>
-
-            <div className="search-toolbar">
-              <label className="search-input-wrap">
-                <span>关键词</span>
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="搜索用户消息或智能体回复，支持短语、关键词和模糊匹配"
-                />
-              </label>
-              <label className="search-filter-wrap">
-                <span>智能体范围</span>
-                <select value={searchAgentId} onChange={(event) => setSearchAgentId(event.target.value)}>
-                  <option value="">全部智能体</option>
-                  {searchableAgentOptions.map((agent) => (
-                    <option value={agent.id} key={agent.id}>
-                      {agent.name} ({agent.conversationCount})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="search-summary">
-              {!searchQuery.trim()
-                ? `当前可检索 ${searchableConversations.length} 个会话，默认覆盖全部智能体；结果按短语命中、关键词覆盖和模糊相关度综合排序。`
-                : `在 ${activeSearchScopeName} 中找到 ${searchResults.length} 条结果，已按相关性从高到低排序。`}
-            </div>
-
-            {searchableConversations.length === 0 ? (
-              <p className="empty-state search-empty-state">当前还没有可搜索的对话内容。</p>
-            ) : !searchQuery.trim() ? (
-              <p className="empty-state search-empty-state">输入关键词后即可搜索用户内容和智能体回复。</p>
-            ) : searchResults.length === 0 ? (
-              <p className="empty-state search-empty-state">没有找到匹配结果，试试更短的关键词或更换智能体范围。</p>
-            ) : (
-              <div className="search-results">
-                {searchResults.map((match) => (
-                  <button
-                    type="button"
-                    className={`search-result-item ${searchNavigationTarget?.matchId === match.id ? 'active' : ''}`}
-                    key={match.id}
-                    onClick={() => openSearchResult(match)}
-                  >
-                    <div className="search-result-header">
-                      <strong>{match.conversationTitle || '未命名会话'}</strong>
-                      <small>{formatLocalTimestamp(match.createdAt)}</small>
-                    </div>
-                    <div className="search-result-meta">
-                      <span>{match.agentName}</span>
-                      <span>{match.role === 'user' ? '用户消息' : '智能体回复'}</span>
-                    </div>
-                    <p className="search-result-snippet">{renderHighlightedText(match.snippet, searchQuery)}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-          </article>
-        )}
-
-        {activeSection === 'billing' && (
-          <article className="panel wide-panel">
-            <div className="panel-heading">
-              <FileText size={20} />
-              <h3>消费明细</h3>
-            </div>
-            <p className="empty-state">消费明细暂未接入，后续会汇总会话 token、模型价格和工具调用用量。</p>
-          </article>
-        )}
-
         {activeSection === 'workbench' && (
           <article className={`panel wide-panel workbench-shell ${contextPanelOpen ? 'context-open' : ''}`}>
             <div className="agent-tabs">
@@ -2108,29 +1765,12 @@ function App(): ReactElement {
                   {transcript.length === 0 ? (
                     <p className="empty-state">选择智能体后即可开始对话，系统会自动准备会话。</p>
                   ) : (
-                    transcript.map((item, messageIndex) => {
-                      const targetMessageIndex = searchNavigationTarget?.messageIndex;
-                      const targetQuery = searchNavigationTarget?.query ?? '';
-                      const isSearchTarget =
-                        searchNavigationTarget?.conversationId === selectedConversation.id &&
-                        targetMessageIndex === messageIndex;
-                      const anchorId = getMessageAnchorId(selectedConversation.id, messageIndex);
-
-                      return (
-                        <div
-                          className={`message-bubble ${item.role}${isSearchTarget ? ' search-target' : ''}`}
-                          key={`${item.createdAt}-${item.role}-${messageIndex}`}
-                          ref={(node) => {
-                            messageElementRefs.current[anchorId] = node;
-                          }}
-                        >
-                          <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
-                          <span>
-                            {isSearchTarget ? renderHighlightedText(item.text, targetQuery) : item.text}
-                          </span>
-                        </div>
-                      );
-                    })
+                    transcript.map((item) => (
+                      <div className={`message-bubble ${item.role}`} key={`${item.createdAt}-${item.role}`}>
+                        <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+                        <span>{item.text}</span>
+                      </div>
+                    ))
                   )}
                 </div>
 
@@ -3616,7 +3256,9 @@ function App(): ReactElement {
                 <span>{requiredLabel('能力类型')}</span>
                 <select
                   value={capabilityEditor.type}
-                  onChange={(event) => applyCapabilityType(event.target.value as CapabilityConfig['type'])}
+                  onChange={(event) =>
+                    updateCapabilityEditor('type', event.target.value as CapabilityConfig['type'])
+                  }
                 >
                   {Object.entries(capabilityTypeLabels).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
@@ -3649,240 +3291,6 @@ function App(): ReactElement {
 第一期不会自动解析，只会原样保存并作为智能体理解能力的上下文。`}
                 />
               </label>
-
-              <div className="form-section-heading wide-field">
-                <strong>类型专属配置</strong>
-                <span>不同能力类型只展示对应字段，避免新增 Tools / Skills 时表单完全一样。</span>
-              </div>
-
-              {capabilityEditor.type === 'tool' && (
-                <div className="tool-config-panel wide-field">
-                  <label>
-                    <span>工具名</span>
-                    <input
-                      value={capabilityEditor.toolName}
-                      onChange={(event) => updateCapabilityEditor('toolName', event.target.value)}
-                      placeholder="enterprise_lookup"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>适用场景</span>
-                    <textarea
-                      value={capabilityEditor.useWhen}
-                      onChange={(event) => updateCapabilityEditor('useWhen', event.target.value)}
-                      rows={3}
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>不适用场景</span>
-                    <textarea
-                      value={capabilityEditor.avoidWhen}
-                      onChange={(event) => updateCapabilityEditor('avoidWhen', event.target.value)}
-                      rows={3}
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'skill' && (
-                <div className="tool-config-panel wide-field">
-                  <label className="wide-field">
-                    <span>Skill 使用说明</span>
-                    <textarea
-                      value={capabilityEditor.useWhen}
-                      onChange={(event) => updateCapabilityEditor('useWhen', event.target.value)}
-                      rows={4}
-                      placeholder="写清楚智能体什么时候应该调用这个 Skill。"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>边界和限制</span>
-                    <textarea
-                      value={capabilityEditor.avoidWhen}
-                      onChange={(event) => updateCapabilityEditor('avoidWhen', event.target.value)}
-                      rows={3}
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'http' && (
-                <div className="tool-config-panel wide-field">
-                  <label className="wide-field">
-                    <span>接口地址</span>
-                    <input
-                      value={capabilityEditor.endpoint}
-                      onChange={(event) => updateCapabilityEditor('endpoint', event.target.value)}
-                      placeholder="https://api.example.com/v1/resource"
-                    />
-                  </label>
-                  <label>
-                    <span>请求方法</span>
-                    <select
-                      value={capabilityEditor.httpMethod}
-                      onChange={(event) =>
-                        updateCapabilityEditor('httpMethod', event.target.value as CapabilityConfig['httpMethod'])
-                      }
-                    >
-                      {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((method) => (
-                        <option key={method} value={method}>{method}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Body 类型</span>
-                    <select
-                      value={capabilityEditor.httpBodyType}
-                      onChange={(event) =>
-                        updateCapabilityEditor('httpBodyType', event.target.value as CapabilityConfig['httpBodyType'])
-                      }
-                    >
-                      <option value="json">JSON</option>
-                      <option value="form-data">Form Data</option>
-                      <option value="text">Text</option>
-                      <option value="binary">Binary</option>
-                      <option value="url-text">URL Text</option>
-                    </select>
-                  </label>
-                  <label className="wide-field">
-                    <span>Header JSON</span>
-                    <textarea
-                      value={capabilityEditor.headersJson}
-                      onChange={(event) => updateCapabilityEditor('headersJson', event.target.value)}
-                      rows={4}
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'mcp' && (
-                <div className="mcp-config-panel wide-field">
-                  <label>
-                    <span>MCP 服务名</span>
-                    <input
-                      value={capabilityEditor.mcpServerName}
-                      onChange={(event) => updateCapabilityEditor('mcpServerName', event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>传输协议</span>
-                    <select
-                      value={capabilityEditor.mcpTransport}
-                      onChange={(event) =>
-                        updateCapabilityEditor('mcpTransport', event.target.value as CapabilityConfig['mcpTransport'])
-                      }
-                    >
-                      <option value="stream-http">Stream HTTP</option>
-                      <option value="sse">SSE</option>
-                    </select>
-                  </label>
-                  <label className="wide-field">
-                    <span>MCP URL</span>
-                    <input
-                      value={capabilityEditor.mcpUrl}
-                      onChange={(event) => updateCapabilityEditor('mcpUrl', event.target.value)}
-                      placeholder="http://127.0.0.1:3000/mcp"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>MCP Headers JSON</span>
-                    <textarea
-                      value={capabilityEditor.mcpHeadersJson}
-                      onChange={(event) => updateCapabilityEditor('mcpHeadersJson', event.target.value)}
-                      rows={4}
-                    />
-                  </label>
-                  <div className="wide-field">
-                    <button type="button" className="secondary-button" onClick={() => discoverMcpTools(capabilityEditor)}>
-                      发现 MCP 工具
-                    </button>
-                  </div>
-                  <div className="mcp-tool-list wide-field">
-                    {capabilityEditor.mcpTools.length === 0 ? (
-                      <p className="empty-state">还没有发现工具。</p>
-                    ) : (
-                      capabilityEditor.mcpTools.map((tool, index) => (
-                        <label className="mcp-tool-row" key={`${tool.name}-${index}`}>
-                          <span className="checkbox-row compact-checkbox">
-                            <input
-                              type="checkbox"
-                              checked={tool.enabled}
-                              onChange={(event) => {
-                                const nextTools = capabilityEditor.mcpTools.map((item, itemIndex) =>
-                                  itemIndex === index ? { ...item, enabled: event.target.checked } : item,
-                                );
-                                updateCapabilityEditor('mcpTools', nextTools);
-                              }}
-                            />
-                            启用
-                          </span>
-                          <strong>{tool.name}</strong>
-                          <span>{tool.description || '暂无说明'}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'browser' && (
-                <div className="browser-config-panel wide-field">
-                  <label>
-                    <span>浏览器模式</span>
-                    <select
-                      value={capabilityEditor.browserMode ?? 'builtin'}
-                      onChange={(event) =>
-                        updateCapabilityEditor('browserMode', event.target.value as CapabilityConfig['browserMode'])
-                      }
-                    >
-                      <option value="builtin">内置受控浏览器</option>
-                      <option value="chrome">本机 Chrome</option>
-                      <option value="mcp">MCP 浏览器</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>最大步骤数</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={capabilityEditor.browserMaxSteps ?? 8}
-                      onChange={(event) => updateCapabilityEditor('browserMaxSteps', Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>允许域名</span>
-                    <input
-                      value={(capabilityEditor.browserAllowedDomains ?? []).join(', ')}
-                      onChange={(event) =>
-                        updateCapabilityEditor(
-                          'browserAllowedDomains',
-                          event.target.value.split(',').map((domain) => domain.trim()).filter(Boolean),
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'command' && (
-                <div className="tool-config-panel wide-field">
-                  <label className="wide-field">
-                    <span>命令</span>
-                    <input
-                      value={capabilityEditor.command}
-                      onChange={(event) => updateCapabilityEditor('command', event.target.value)}
-                      placeholder="node scripts/example.js"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>工作目录</span>
-                    <input
-                      value={capabilityEditor.workingDirectory}
-                      onChange={(event) => updateCapabilityEditor('workingDirectory', event.target.value)}
-                    />
-                  </label>
-                </div>
-              )}
 
               <div className="form-section-heading wide-field">
                 <strong>管理信息</strong>

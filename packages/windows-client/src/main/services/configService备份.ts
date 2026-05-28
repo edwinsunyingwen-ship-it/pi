@@ -8,7 +8,6 @@ import type {
 	CapabilityConfig,
 	ClientConfig,
 	ClientConfigState,
-	ClientVariableConfig,
 	ModelConfig,
 	ModelProfileConfig,
 } from "../../shared/types";
@@ -43,18 +42,6 @@ export class ConfigService {
 		});
 
 		await this.writeConfig(nextConfig, true, "save-agent-core-config", "更新智能体内核与 RPC 配置。");
-		return { configPath: this.configPath, config: nextConfig };
-	}
-
-	async saveVariablesConfig(variables: ClientVariableConfig[]): Promise<ClientConfigState> {
-		const current = await this.getConfig();
-		const nextConfig = this.mergeWithDefaults({
-			...current.config,
-			variables,
-			updatedAt: new Date().toISOString(),
-		});
-
-		await this.writeConfig(nextConfig, true, "save-client-variables", "更新全局变量配置。");
 		return { configPath: this.configPath, config: nextConfig };
 	}
 
@@ -98,14 +85,8 @@ export class ConfigService {
 
 	async saveCapabilityConfig(capability: CapabilityConfig): Promise<ClientConfigState> {
 		const current = await this.getConfig();
-		const now = new Date().toISOString();
-		const existingCapability = current.config.capabilities.find((item) => item.id === capability.id);
-		const normalizedCapability = {
-			...this.normalizeCapabilities([capability], undefined, [])[0],
-			createdAt: existingCapability?.createdAt ?? capability.createdAt ?? now,
-			updatedAt: now,
-		};
-		const exists = Boolean(existingCapability);
+		const normalizedCapability = this.normalizeCapabilities([capability], undefined, [])[0];
+		const exists = current.config.capabilities.some((item) => item.id === normalizedCapability.id);
 		const capabilities = exists
 			? current.config.capabilities.map((item) =>
 					item.id === normalizedCapability.id ? normalizedCapability : item,
@@ -215,14 +196,11 @@ export class ConfigService {
 	}
 
 	private createDefaultConfig(): ClientConfig {
-		const createdAt = new Date().toISOString();
-
 		return {
 			agentCore: {
 				mode: "embedded-rpc",
 				rpcEndpoint: "local-subprocess",
 			},
-			variables: [],
 			model: {
 				defaultModelId: "openai-default",
 				models: [
@@ -262,45 +240,22 @@ export class ConfigService {
 			capabilities: [
 				{
 					id: "ocr-verify",
-					createdAt,
-					updatedAt: createdAt,
 					name: "OCR 验证",
 					type: "tool",
-					toolName: "ocr_verify",
 					category: "OCR",
 					description: "用于调用 OCR 验证服务或脚本。",
-					useWhen: "",
-					avoidWhen: "",
 					content: "",
 					advancedConfig: "",
 					triggerMode: "agent",
 					executionMode: "http",
 					endpoint: "",
 					httpMethod: "POST",
-					httpBodyType: "json",
-					httpContentType: "application/json",
-					httpQueryParamsJson: "",
-					httpAuthType: "none",
-					httpAuthHeaderName: "Authorization",
-					httpAuthTokenEnv: "",
-					httpAuthTokenValue: "",
 					command: "",
-					mcpServerName: "",
-					mcpUrl: "",
-					mcpTransport: "stream-http",
-					mcpAuthType: "bearer",
-					mcpApiKeyValue: "",
-					mcpHeadersJson: "",
-					mcpTools: [],
 					workingDirectory: "",
 					tokenEnv: "OCR_API_TOKEN",
 					headersJson: "",
 					inputSchemaJson: "",
 					outputSchemaJson: "",
-					resultFormat: "text",
-					resultMapping: "",
-					costPolicy: "free",
-					requiresConfirmation: false,
 					timeoutMs: 600000,
 					retryCount: 1,
 					enabled: false,
@@ -358,7 +313,6 @@ export class ConfigService {
 				legacyConfig.rpcEndpoint,
 				defaultConfig.agentCore,
 			),
-			variables: this.normalizeVariables(config.variables),
 			model: this.applyModelUsage(model, agents),
 			capabilities: this.applyCapabilityUsage(capabilities, agents),
 			agents,
@@ -380,23 +334,6 @@ export class ConfigService {
 			mode: agentCore?.mode ?? legacyMode ?? defaultAgentCore.mode,
 			rpcEndpoint: agentCore?.rpcEndpoint ?? legacyRpcEndpoint ?? defaultAgentCore.rpcEndpoint,
 		};
-	}
-
-	private normalizeVariables(variables: ClientVariableConfig[] | undefined): ClientVariableConfig[] {
-		const usedNames = new Set<string>();
-		return (variables ?? [])
-			.map((variable) => ({
-				name: variable.name.trim(),
-				value: variable.value ?? "",
-				description: variable.description?.trim() ?? "",
-			}))
-			.filter((variable) => {
-				if (!variable.name || usedNames.has(variable.name)) {
-					return false;
-				}
-				usedNames.add(variable.name);
-				return true;
-			});
 	}
 
 	private normalizeModel(
@@ -504,15 +441,10 @@ export class ConfigService {
 		if (capabilities !== undefined) {
 			return capabilities.map((capability) => ({
 				id: capability.id || crypto.randomUUID(),
-				createdAt: capability.createdAt ?? new Date().toISOString(),
-				updatedAt: capability.updatedAt ?? capability.createdAt ?? new Date().toISOString(),
 				name: capability.name || "未命名能力",
 				type: capability.type ?? "tool",
-				toolName: capability.toolName ?? "",
 				category: capability.category ?? "",
 				description: capability.description ?? "",
-				useWhen: capability.useWhen ?? "",
-				avoidWhen: capability.avoidWhen ?? "",
 				content: capability.content ?? "",
 				advancedConfig: capability.advancedConfig ?? "",
 				triggerMode: capability.triggerMode ?? "agent",
@@ -520,38 +452,12 @@ export class ConfigService {
 					capability.executionMode ?? (capability.endpoint ? "http" : capability.command ? "command" : "manual"),
 				endpoint: capability.endpoint ?? "",
 				httpMethod: capability.httpMethod ?? "POST",
-				httpBodyType: capability.httpBodyType ?? "json",
-				httpContentType: capability.httpContentType ?? "application/json",
-				httpQueryParamsJson: capability.httpQueryParamsJson ?? "",
-				httpAuthType: capability.httpAuthType ?? "none",
-				httpAuthHeaderName: capability.httpAuthHeaderName ?? "Authorization",
-				httpAuthTokenEnv: capability.httpAuthTokenEnv ?? "",
-				httpAuthTokenValue: capability.httpAuthTokenValue ?? "",
 				command: capability.command ?? "",
-				mcpServerName: capability.mcpServerName ?? "",
-				mcpUrl: capability.mcpUrl ?? "",
-				mcpTransport: capability.mcpTransport ?? "stream-http",
-				mcpAuthType: capability.mcpAuthType ?? "none",
-				mcpApiKeyValue: capability.mcpApiKeyValue ?? "",
-				mcpHeadersJson: capability.mcpHeadersJson ?? "",
-				mcpTools: this.normalizeMcpTools(capability.mcpTools),
-				browserMode: capability.browserMode ?? "builtin",
-				browserAllowedDomains: this.normalizeStringList(capability.browserAllowedDomains),
-				browserBlockedDomains: this.normalizeStringList(capability.browserBlockedDomains),
-				browserAllowScreenshots: capability.browserAllowScreenshots ?? true,
-				browserAllowDownloads: capability.browserAllowDownloads ?? false,
-				browserRequireConfirmation: capability.browserRequireConfirmation ?? true,
-				browserMaxSteps: Number(capability.browserMaxSteps ?? 20),
-				browserTimeoutMs: Number(capability.browserTimeoutMs ?? 120000),
 				workingDirectory: capability.workingDirectory ?? "",
 				tokenEnv: capability.tokenEnv ?? "",
 				headersJson: capability.headersJson ?? "",
 				inputSchemaJson: capability.inputSchemaJson ?? "",
 				outputSchemaJson: capability.outputSchemaJson ?? "",
-				resultFormat: capability.resultFormat ?? "text",
-				resultMapping: capability.resultMapping ?? "",
-				costPolicy: capability.costPolicy ?? "free",
-				requiresConfirmation: capability.requiresConfirmation ?? false,
 				timeoutMs: Number(capability.timeoutMs ?? 600000),
 				retryCount: Number(capability.retryCount ?? 1),
 				enabled: Boolean(capability.enabled),
@@ -567,8 +473,6 @@ export class ConfigService {
 			return [
 				{
 					id: "legacy-enterprise-api",
-					createdAt: new Date().toISOString(),
-					updatedAt: new Date().toISOString(),
 					name: "企业接口能力",
 					type: "tool",
 					category: "企业接口",
@@ -580,40 +484,11 @@ export class ConfigService {
 					endpoint: legacyEnterpriseApiBaseUrl,
 					httpMethod: "POST",
 					command: "",
-					mcpServerName: "",
-					mcpUrl: "",
-					mcpTransport: "stream-http",
-					mcpAuthType: "none",
-					mcpApiKeyValue: "",
-					mcpHeadersJson: "",
-					mcpTools: [],
-					browserMode: "builtin",
-					browserAllowedDomains: [],
-					browserBlockedDomains: [],
-					browserAllowScreenshots: true,
-					browserAllowDownloads: false,
-					browserRequireConfirmation: true,
-					browserMaxSteps: 20,
-					browserTimeoutMs: 120000,
 					workingDirectory: "",
 					tokenEnv: "",
 					headersJson: "",
 					inputSchemaJson: "",
 					outputSchemaJson: "",
-					toolName: "legacy_enterprise_api",
-					useWhen: "",
-					avoidWhen: "",
-					httpBodyType: "json",
-					httpContentType: "application/json",
-					httpQueryParamsJson: "",
-					httpAuthType: "none",
-					httpAuthHeaderName: "Authorization",
-					httpAuthTokenEnv: "",
-					httpAuthTokenValue: "",
-					resultFormat: "text",
-					resultMapping: "",
-					costPolicy: "free",
-					requiresConfirmation: false,
 					timeoutMs: 600000,
 					retryCount: 1,
 					enabled: true,
@@ -627,21 +502,6 @@ export class ConfigService {
 		}
 
 		return defaultCapabilities;
-	}
-
-	private normalizeMcpTools(tools: CapabilityConfig["mcpTools"] | undefined): CapabilityConfig["mcpTools"] {
-		return (tools ?? [])
-			.map((tool) => ({
-				name: tool.name?.trim() ?? "",
-				description: tool.description?.trim() ?? "",
-				inputSchemaJson: tool.inputSchemaJson?.trim() ?? "",
-				enabled: tool.enabled ?? true,
-			}))
-			.filter((tool) => tool.name.length > 0);
-	}
-
-	private normalizeStringList(values: string[] | undefined): string[] {
-		return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
 	}
 
 	private normalizeAgents(

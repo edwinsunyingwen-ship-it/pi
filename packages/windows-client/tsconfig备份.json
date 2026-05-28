@@ -17,6 +17,5 @@
     "jsx": "react-jsx",
     "types": ["node"]
   },
-  "include": ["src", "electron.vite.config.ts"],
-  "exclude": ["**/*备份*"]
+  "include": ["src", "electron.vite.config.ts"]
 }

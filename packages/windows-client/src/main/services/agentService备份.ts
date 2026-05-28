@@ -6,7 +6,6 @@ import type {
 	AgentToolInfo,
 	AuditStatus,
 	CapabilityConfig,
-	McpToolDiscoveryResult,
 	ModelConnectionTestResult,
 	ModelProfileConfig,
 } from "../../shared/types";
@@ -55,8 +54,6 @@ export class AgentService {
 		const startedSession = await this.adapter.startSession({
 			model,
 			cwd: effectiveWorkspacePath,
-			capabilities: enabledCapabilities,
-			variables: configState.config.variables,
 			appendSystemPrompt: this.buildAgentAppendSystemPrompt(
 				agent,
 				model,
@@ -213,98 +210,6 @@ export class AgentService {
 		return this.adapter.getSessionState(sessionId);
 	}
 
-	async discoverMcpTools(capability: CapabilityConfig): Promise<McpToolDiscoveryResult> {
-		const testedAt = new Date().toISOString();
-		const capabilityName = capability.name || capability.mcpServerName || "MCP";
-
-		if (capability.type !== "mcp") {
-			return {
-				status: "failure",
-				message: "只有 MCP 类型的能力可以发现工具。",
-				tools: [],
-				testedAt,
-			};
-		}
-		if (!capability.mcpUrl.trim() || !this.isValidHttpUrl(capability.mcpUrl)) {
-			const message = "MCP 服务地址不正确，请填写 http:// 或 https:// 开头的完整地址。";
-			await this.writeAudit({
-				businessAction: "discover-mcp-tools",
-				inputSummary: capabilityName,
-				outputSummary: message,
-				status: "failure",
-			});
-			return { status: "failure", message, tools: [], testedAt };
-		}
-		if (capability.mcpAuthType === "bearer" && !capability.mcpApiKeyValue.trim()) {
-			const message = "当前 MCP 服务选择了 Bearer Token，请先填写 API Key / Token。";
-			await this.writeAudit({
-				businessAction: "discover-mcp-tools",
-				inputSummary: capabilityName,
-				outputSummary: message,
-				status: "failure",
-			});
-			return { status: "failure", message, tools: [], testedAt };
-		}
-
-		try {
-			const headers = this.parseHeaderJson(capability.mcpHeadersJson);
-			const session: { id?: string } = {};
-			await this.postMcp(
-				capability,
-				session,
-				{
-					jsonrpc: "2.0",
-					id: "initialize",
-					method: "initialize",
-					params: {
-						protocolVersion: "2024-11-05",
-						capabilities: {},
-						clientInfo: { name: "pi-windows-client", version: "0.1.0" },
-					},
-				},
-				headers,
-			);
-			try {
-				await this.postMcp(capability, session, { jsonrpc: "2.0", method: "notifications/initialized" }, headers);
-			} catch {
-				// Some MCP HTTP services do not require this notification.
-			}
-			const result = await this.postMcp(
-				capability,
-				session,
-				{ jsonrpc: "2.0", id: "tools-list", method: "tools/list", params: {} },
-				headers,
-			);
-			const tools = this.normalizeDiscoveredMcpTools(result);
-			const message =
-				tools.length > 0 ? `发现 ${tools.length} 个 MCP 工具。` : "MCP 服务已连接，但没有返回可用工具。";
-			await this.writeAudit({
-				businessAction: "discover-mcp-tools",
-				inputSummary: capabilityName,
-				outputSummary: message,
-				status: tools.length > 0 ? "success" : "failure",
-			});
-			return {
-				status: tools.length > 0 ? "success" : "failure",
-				message,
-				tools,
-				testedAt,
-			};
-		} catch (error) {
-			const message = `发现 MCP 工具失败：${this.truncate(
-				this.redactSensitive(error instanceof Error ? error.message : String(error)),
-				500,
-			)}`;
-			await this.writeAudit({
-				businessAction: "discover-mcp-tools",
-				inputSummary: capabilityName,
-				status: "failure",
-				errorMessage: message,
-			});
-			return { status: "failure", message, tools: [], testedAt };
-		}
-	}
-
 	async listAvailableTools(): Promise<AgentToolInfo[]> {
 		const [builtInTools, configState] = await Promise.all([
 			this.adapter.listAvailableTools(),
@@ -365,27 +270,26 @@ export class AgentService {
 		for (const call of calls) {
 			const matchedCapability = this.findMatchingCapability(call, enabledCapabilities);
 			const displayName = this.getCapabilityDisplayName(call, matchedCapability);
-			const toolMeta = this.getCapabilityToolMeta(call, matchedCapability);
 			if (call.inputSummary) {
 				await this.writeAudit({
 					sessionId,
 					toolName: call.toolName,
 					businessAction: "capability-invoked",
 					inputSummary: this.truncate(this.redactSensitive(call.inputSummary), 500),
-					outputSummary: `调用能力：${displayName}；${toolMeta}`,
+					outputSummary: `调用能力：${displayName}`,
 					status: "success",
 				});
 			}
 
-			const resultSummary = this.redactSensitive(
-				call.outputSummary || `能力 ${displayName} 已执行，但没有返回可展示内容。`,
-			);
 			await this.writeAudit({
 				sessionId,
 				toolName: call.toolName,
 				businessAction: "capability-result",
 				inputSummary: call.inputSummary ? this.truncate(this.redactSensitive(call.inputSummary), 240) : undefined,
-				outputSummary: this.truncate(`${toolMeta}；返回：${resultSummary}`, 500),
+				outputSummary: this.truncate(
+					this.redactSensitive(call.outputSummary || `能力 ${displayName} 已执行，但没有返回可展示内容。`),
+					500,
+				),
 				status: call.status,
 				errorMessage:
 					call.status === "failure"
@@ -400,47 +304,6 @@ export class AgentService {
 		return call.toolCallId ? `${name}（${call.toolCallId}）` : name;
 	}
 
-	private getCapabilityToolMeta(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string {
-		const type = capability ? this.getCapabilityTypeLabel(capability) : this.getBuiltinToolType(call.toolName);
-		const execution = capability ? this.getCapabilityExecutionLabel(capability) : "Pi 内置工具";
-		const parts = [`工具：${call.toolName || "未知工具"}`, `类型：${type}`, `执行方式：${execution}`];
-		if (call.toolCallId) {
-			parts.push(`调用ID：${call.toolCallId}`);
-		}
-		if (capability?.mcpServerName) {
-			parts.push(`MCP：${capability.mcpServerName}`);
-		}
-		return parts.join("；");
-	}
-
-	private getBuiltinToolType(toolName: string): string {
-		return ["read", "bash", "edit", "write"].includes(toolName) ? "内置工具" : "工具";
-	}
-
-	private getCapabilityTypeLabel(capability: CapabilityConfig): string {
-		const labels: Record<CapabilityConfig["type"], string> = {
-			tool: "Tool",
-			skill: "Skill",
-			mcp: "MCP",
-			browser: "浏览器能力",
-			http: "HTTP 接口",
-			command: "本地命令",
-			other: "其他能力",
-		};
-		return labels[capability.type] ?? capability.type;
-	}
-
-	private getCapabilityExecutionLabel(capability: CapabilityConfig): string {
-		const labels: Record<CapabilityConfig["executionMode"], string> = {
-			http: "HTTP API",
-			command: "本地命令",
-			builtin: "内置能力",
-			mcp: "MCP 工具",
-			manual: "手动/占位",
-		};
-		return labels[capability.executionMode] ?? capability.executionMode;
-	}
-
 	private findMatchingCapability(
 		call: AgentCapabilityCallLog,
 		capabilities: CapabilityConfig[],
@@ -450,15 +313,9 @@ export class AgentService {
 		return capabilities.find((capability) => {
 			const candidates = [
 				capability.name,
-				capability.toolName,
 				capability.category,
-				capability.useWhen,
-				capability.avoidWhen,
 				capability.command,
 				capability.endpoint,
-				capability.mcpServerName,
-				capability.mcpUrl,
-				...capability.mcpTools.flatMap((tool) => [tool.name, tool.description]),
 				...capability.tags,
 			]
 				.filter(Boolean)
@@ -484,110 +341,6 @@ export class AgentService {
 		} catch {
 			return false;
 		}
-	}
-
-	private parseHeaderJson(value: string): Record<string, string> {
-		if (!value.trim()) {
-			return {};
-		}
-		try {
-			const parsed = JSON.parse(value) as unknown;
-			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-				throw new Error("请求头必须是 JSON 对象。");
-			}
-			return Object.fromEntries(
-				Object.entries(parsed as Record<string, unknown>)
-					.filter(([, headerValue]) => headerValue !== undefined && headerValue !== null)
-					.map(([key, headerValue]) => [key, String(headerValue)]),
-			);
-		} catch (error) {
-			throw new Error(`请求头 JSON 格式不正确：${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	private async postMcp(
-		capability: CapabilityConfig,
-		session: { id?: string },
-		payload: Record<string, unknown>,
-		extraHeaders: Record<string, string>,
-	): Promise<unknown> {
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-			Accept: "application/json, text/event-stream",
-			...extraHeaders,
-		};
-		if (capability.mcpAuthType === "bearer" && capability.mcpApiKeyValue.trim()) {
-			headers.Authorization = `Bearer ${capability.mcpApiKeyValue.trim()}`;
-		}
-		if (session.id) {
-			headers["mcp-session-id"] = session.id;
-		}
-
-		const response = await fetch(capability.mcpUrl, {
-			method: "POST",
-			headers,
-			body: JSON.stringify(payload),
-		});
-		const sessionId = response.headers.get("mcp-session-id");
-		if (sessionId) {
-			session.id = sessionId;
-		}
-		const text = await response.text();
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}：${this.redactSensitive(text).slice(0, 800)}`);
-		}
-		const data = this.parseMcpResponseText(text);
-		if (this.isRecord(data) && data.error) {
-			throw new Error(this.redactSensitive(JSON.stringify(data.error)));
-		}
-		return this.isRecord(data) && "result" in data ? data.result : data;
-	}
-
-	private parseMcpResponseText(text: string): unknown {
-		const trimmed = text.trim();
-		if (!trimmed) {
-			return {};
-		}
-		if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-			return JSON.parse(trimmed) as unknown;
-		}
-		const messages: unknown[] = [];
-		for (const line of trimmed.split(/\r?\n/)) {
-			const match = line.match(/^data:\s*(.+)$/);
-			if (!match || match[1] === "[DONE]") {
-				continue;
-			}
-			try {
-				messages.push(JSON.parse(match[1]) as unknown);
-			} catch {
-				// Ignore non-JSON SSE lines.
-			}
-		}
-		return (
-			messages.find((item) => this.isRecord(item) && ("result" in item || "error" in item)) ?? messages.at(-1) ?? {}
-		);
-	}
-
-	private normalizeDiscoveredMcpTools(result: unknown): McpToolDiscoveryResult["tools"] {
-		const sourceTools = this.isRecord(result) && Array.isArray(result.tools) ? result.tools : [];
-		return sourceTools
-			.map((tool) => {
-				const record = this.isRecord(tool) ? tool : {};
-				const name = typeof record.name === "string" ? record.name.trim() : "";
-				const description = typeof record.description === "string" ? record.description.trim() : "";
-				const inputSchema = this.isRecord(record.inputSchema) ? record.inputSchema : {};
-				return {
-					name,
-					description,
-					inputSchemaJson: Object.keys(inputSchema).length > 0 ? JSON.stringify(inputSchema, null, 2) : "",
-					enabled: true,
-				};
-			})
-			.filter((tool) => tool.name.length > 0);
-	}
-
-	private isRecord(value: unknown): value is Record<string, unknown> {
-		return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 	}
 
 	private buildAgentAppendSystemPrompt(

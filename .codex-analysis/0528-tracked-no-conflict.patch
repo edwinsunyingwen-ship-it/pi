@@ -1,0 +1,3407 @@
+diff --git a/package-lock.json b/package-lock.json
+index e2949753..c2869bf9 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -9232,6 +9232,7 @@
+ 			"version": "0.1.0",
+ 			"dependencies": {
+ 				"lucide-react": "^0.468.0",
++				"marked": "^16.3.0",
+ 				"react": "^19.0.0",
+ 				"react-dom": "^19.0.0"
+ 			},
+diff --git a/packages/web-ui/example/tsconfig.json b/packages/web-ui/example/tsconfig.json
+index 9e8c4333..fc32ea0e 100644
+--- a/packages/web-ui/example/tsconfig.json
++++ b/packages/web-ui/example/tsconfig.json
+@@ -6,10 +6,10 @@
+ 		"moduleResolution": "bundler",
+ 		"paths": {
+ 			"*": ["./*"],
+-			"@earendil-works/pi-agent-core": ["../../agent/dist/index.d.ts"],
+-			"@earendil-works/pi-ai": ["../../ai/dist/index.d.ts"],
++			"@earendil-works/pi-agent-core": ["../../agent/src/index.ts"],
++			"@earendil-works/pi-ai": ["../../ai/src/index.ts"],
+ 			"@earendil-works/pi-tui": ["../../tui/dist/index.d.ts"],
+-			"@earendil-works/pi-web-ui": ["../dist/index.d.ts"]
++			"@earendil-works/pi-web-ui": ["../src/index.ts"]
+ 		},
+ 		"strict": true,
+ 		"skipLibCheck": true,
+diff --git a/packages/web-ui/tsconfig.json b/packages/web-ui/tsconfig.json
+index 25e8cea9..828efb85 100644
+--- a/packages/web-ui/tsconfig.json
++++ b/packages/web-ui/tsconfig.json
+@@ -1,7 +1,12 @@
+ {
+   "extends": "../../tsconfig.base.json",
+   "compilerOptions": {
+-    "noEmit": true
++    "lib": ["ES2022", "DOM", "DOM.Iterable"],
++    "noEmit": true,
++    "paths": {
++      "@earendil-works/pi-agent-core": ["../agent/src/index.ts"],
++      "@earendil-works/pi-ai": ["../ai/src/index.ts"]
++    }
+   },
+   "include": ["src/**/*"]
+ }
+diff --git a/packages/windows-client/package.json b/packages/windows-client/package.json
+index 52a5ba50..c425a8d3 100644
+--- a/packages/windows-client/package.json
++++ b/packages/windows-client/package.json
+@@ -13,6 +13,7 @@
+   },
+   "dependencies": {
+     "lucide-react": "^0.468.0",
++    "marked": "^16.3.0",
+     "react": "^19.0.0",
+     "react-dom": "^19.0.0"
+   },
+diff --git a/packages/windows-client/src/main/index.ts b/packages/windows-client/src/main/index.ts
+index dde50b86..682d7704 100644
+--- a/packages/windows-client/src/main/index.ts
++++ b/packages/windows-client/src/main/index.ts
+@@ -1,4 +1,5 @@
+-import { join } from "node:path";
++import { dirname, join } from "node:path";
++import { fileURLToPath } from "node:url";
+ import { app, BrowserWindow, ipcMain } from "electron";
+ import { IPC_CHANNELS } from "../shared/ipc";
+ import type {
+@@ -7,12 +8,14 @@ import type {
+ 	AppEnvironment,
+ 	AuditLogQuery,
+ 	CapabilityConfig,
++	ClientVariableConfig,
+ 	ModelConfig,
+ 	ModelProfileConfig,
+ } from "../shared/types";
+ import { RpcAgentAdapter } from "./agent/agentAdapter";
+ import { AgentService } from "./services/agentService";
+ import { AuditLogger } from "./services/auditLogger";
++import { BrowserToolService } from "./services/browserToolService";
+ import { ConfigService } from "./services/configService";
+ import { WorkspaceFileService } from "./services/workspaceFileService";
+ import { WorkspaceService } from "./services/workspaceService";
+@@ -21,8 +24,10 @@ const auditLogger = new AuditLogger();
+ const configService = new ConfigService(auditLogger);
+ const workspaceService = new WorkspaceService(auditLogger);
+ const workspaceFileService = new WorkspaceFileService(workspaceService, auditLogger);
+-const agentAdapter = new RpcAgentAdapter();
++const browserToolService = new BrowserToolService(auditLogger);
++const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
+ const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
++const mainDir = dirname(fileURLToPath(import.meta.url));
+ 
+ function createWindow(): void {
+ 	const window = new BrowserWindow({
+@@ -33,7 +38,7 @@ function createWindow(): void {
+ 		title: "Pi 智能体客户端",
+ 		backgroundColor: "#f6f5f2",
+ 		webPreferences: {
+-			preload: join(__dirname, "../preload/index.mjs"),
++			preload: join(mainDir, "../preload/index.mjs"),
+ 			sandbox: false,
+ 			contextIsolation: true,
+ 			nodeIntegration: false,
+@@ -54,7 +59,7 @@ function createWindow(): void {
+ 	if (process.env.NODE_ENV === "development" || process.env.ELECTRON_RENDERER_URL) {
+ 		void window.loadURL(rendererUrl);
+ 	} else {
+-		void window.loadFile(join(__dirname, "../renderer/index.html"));
++		void window.loadFile(join(mainDir, "../renderer/index.html"));
+ 	}
+ }
+ 
+@@ -73,6 +78,9 @@ function registerIpcHandlers(): void {
+ 	ipcMain.handle(IPC_CHANNELS.configSaveAgentCore, (_event, agentCore: AgentCoreConfig) =>
+ 		configService.saveAgentCoreConfig(agentCore),
+ 	);
++	ipcMain.handle(IPC_CHANNELS.configSaveVariables, (_event, variables: ClientVariableConfig[]) =>
++		configService.saveVariablesConfig(variables),
++	);
+ 	ipcMain.handle(IPC_CHANNELS.configSaveModel, (_event, model: ModelConfig) => configService.saveModelConfig(model));
+ 	ipcMain.handle(IPC_CHANNELS.configDeleteModel, (_event, id: string) => configService.deleteModelConfig(id));
+ 	ipcMain.handle(IPC_CHANNELS.configTestModel, (_event, model: ModelProfileConfig) =>
+@@ -84,6 +92,9 @@ function registerIpcHandlers(): void {
+ 	ipcMain.handle(IPC_CHANNELS.configDeleteCapability, (_event, id: string) =>
+ 		configService.deleteCapabilityConfig(id),
+ 	);
++	ipcMain.handle(IPC_CHANNELS.configDiscoverMcpTools, (_event, capability: CapabilityConfig) =>
++		agentService.discoverMcpTools(capability),
++	);
+ 	ipcMain.handle(IPC_CHANNELS.configSaveAgent, (_event, agent: AgentConfig) => configService.saveAgentConfig(agent));
+ 	ipcMain.handle(IPC_CHANNELS.configDeleteAgent, (_event, id: string) => configService.deleteAgentConfig(id));
+ 	ipcMain.handle(IPC_CHANNELS.configReset, () => configService.resetConfig());
+diff --git a/packages/windows-client/src/main/services/configService.ts b/packages/windows-client/src/main/services/configService.ts
+index b76eb136..af39c800 100644
+--- a/packages/windows-client/src/main/services/configService.ts
++++ b/packages/windows-client/src/main/services/configService.ts
+@@ -8,6 +8,7 @@ import type {
+ 	CapabilityConfig,
+ 	ClientConfig,
+ 	ClientConfigState,
++	ClientVariableConfig,
+ 	ModelConfig,
+ 	ModelProfileConfig,
+ } from "../../shared/types";
+@@ -45,6 +46,18 @@ export class ConfigService {
+ 		return { configPath: this.configPath, config: nextConfig };
+ 	}
+ 
++	async saveVariablesConfig(variables: ClientVariableConfig[]): Promise<ClientConfigState> {
++		const current = await this.getConfig();
++		const nextConfig = this.mergeWithDefaults({
++			...current.config,
++			variables,
++			updatedAt: new Date().toISOString(),
++		});
++
++		await this.writeConfig(nextConfig, true, "save-client-variables", "更新全局变量配置。");
++		return { configPath: this.configPath, config: nextConfig };
++	}
++
+ 	async saveModelConfig(model: ModelConfig): Promise<ClientConfigState> {
+ 		const current = await this.getConfig();
+ 		const nextConfig = this.mergeWithDefaults({
+@@ -85,8 +98,14 @@ export class ConfigService {
+ 
+ 	async saveCapabilityConfig(capability: CapabilityConfig): Promise<ClientConfigState> {
+ 		const current = await this.getConfig();
+-		const normalizedCapability = this.normalizeCapabilities([capability], undefined, [])[0];
+-		const exists = current.config.capabilities.some((item) => item.id === normalizedCapability.id);
++		const now = new Date().toISOString();
++		const existingCapability = current.config.capabilities.find((item) => item.id === capability.id);
++		const normalizedCapability = {
++			...this.normalizeCapabilities([capability], undefined, [])[0],
++			createdAt: existingCapability?.createdAt ?? capability.createdAt ?? now,
++			updatedAt: now,
++		};
++		const exists = Boolean(existingCapability);
+ 		const capabilities = exists
+ 			? current.config.capabilities.map((item) =>
+ 					item.id === normalizedCapability.id ? normalizedCapability : item,
+@@ -196,11 +215,14 @@ export class ConfigService {
+ 	}
+ 
+ 	private createDefaultConfig(): ClientConfig {
++		const createdAt = new Date().toISOString();
++
+ 		return {
+ 			agentCore: {
+ 				mode: "embedded-rpc",
+ 				rpcEndpoint: "local-subprocess",
+ 			},
++			variables: [],
+ 			model: {
+ 				defaultModelId: "openai-default",
+ 				models: [
+@@ -240,22 +262,45 @@ export class ConfigService {
+ 			capabilities: [
+ 				{
+ 					id: "ocr-verify",
++					createdAt,
++					updatedAt: createdAt,
+ 					name: "OCR 验证",
+ 					type: "tool",
++					toolName: "ocr_verify",
+ 					category: "OCR",
+ 					description: "用于调用 OCR 验证服务或脚本。",
++					useWhen: "",
++					avoidWhen: "",
+ 					content: "",
+ 					advancedConfig: "",
+ 					triggerMode: "agent",
+ 					executionMode: "http",
+ 					endpoint: "",
+ 					httpMethod: "POST",
++					httpBodyType: "json",
++					httpContentType: "application/json",
++					httpQueryParamsJson: "",
++					httpAuthType: "none",
++					httpAuthHeaderName: "Authorization",
++					httpAuthTokenEnv: "",
++					httpAuthTokenValue: "",
+ 					command: "",
++					mcpServerName: "",
++					mcpUrl: "",
++					mcpTransport: "stream-http",
++					mcpAuthType: "bearer",
++					mcpApiKeyValue: "",
++					mcpHeadersJson: "",
++					mcpTools: [],
+ 					workingDirectory: "",
+ 					tokenEnv: "OCR_API_TOKEN",
+ 					headersJson: "",
+ 					inputSchemaJson: "",
+ 					outputSchemaJson: "",
++					resultFormat: "text",
++					resultMapping: "",
++					costPolicy: "free",
++					requiresConfirmation: false,
+ 					timeoutMs: 600000,
+ 					retryCount: 1,
+ 					enabled: false,
+@@ -313,6 +358,7 @@ export class ConfigService {
+ 				legacyConfig.rpcEndpoint,
+ 				defaultConfig.agentCore,
+ 			),
++			variables: this.normalizeVariables(config.variables),
+ 			model: this.applyModelUsage(model, agents),
+ 			capabilities: this.applyCapabilityUsage(capabilities, agents),
+ 			agents,
+@@ -336,6 +382,23 @@ export class ConfigService {
+ 		};
+ 	}
+ 
++	private normalizeVariables(variables: ClientVariableConfig[] | undefined): ClientVariableConfig[] {
++		const usedNames = new Set<string>();
++		return (variables ?? [])
++			.map((variable) => ({
++				name: variable.name.trim(),
++				value: variable.value ?? "",
++				description: variable.description?.trim() ?? "",
++			}))
++			.filter((variable) => {
++				if (!variable.name || usedNames.has(variable.name)) {
++					return false;
++				}
++				usedNames.add(variable.name);
++				return true;
++			});
++	}
++
+ 	private normalizeModel(
+ 		model: ModelConfig | undefined,
+ 		legacyModelProvider: string | undefined,
+@@ -441,10 +504,15 @@ export class ConfigService {
+ 		if (capabilities !== undefined) {
+ 			return capabilities.map((capability) => ({
+ 				id: capability.id || crypto.randomUUID(),
++				createdAt: capability.createdAt ?? new Date().toISOString(),
++				updatedAt: capability.updatedAt ?? capability.createdAt ?? new Date().toISOString(),
+ 				name: capability.name || "未命名能力",
+ 				type: capability.type ?? "tool",
++				toolName: capability.toolName ?? "",
+ 				category: capability.category ?? "",
+ 				description: capability.description ?? "",
++				useWhen: capability.useWhen ?? "",
++				avoidWhen: capability.avoidWhen ?? "",
+ 				content: capability.content ?? "",
+ 				advancedConfig: capability.advancedConfig ?? "",
+ 				triggerMode: capability.triggerMode ?? "agent",
+@@ -452,12 +520,38 @@ export class ConfigService {
+ 					capability.executionMode ?? (capability.endpoint ? "http" : capability.command ? "command" : "manual"),
+ 				endpoint: capability.endpoint ?? "",
+ 				httpMethod: capability.httpMethod ?? "POST",
++				httpBodyType: capability.httpBodyType ?? "json",
++				httpContentType: capability.httpContentType ?? "application/json",
++				httpQueryParamsJson: capability.httpQueryParamsJson ?? "",
++				httpAuthType: capability.httpAuthType ?? "none",
++				httpAuthHeaderName: capability.httpAuthHeaderName ?? "Authorization",
++				httpAuthTokenEnv: capability.httpAuthTokenEnv ?? "",
++				httpAuthTokenValue: capability.httpAuthTokenValue ?? "",
+ 				command: capability.command ?? "",
++				mcpServerName: capability.mcpServerName ?? "",
++				mcpUrl: capability.mcpUrl ?? "",
++				mcpTransport: capability.mcpTransport ?? "stream-http",
++				mcpAuthType: capability.mcpAuthType ?? "none",
++				mcpApiKeyValue: capability.mcpApiKeyValue ?? "",
++				mcpHeadersJson: capability.mcpHeadersJson ?? "",
++				mcpTools: this.normalizeMcpTools(capability.mcpTools),
++				browserMode: capability.browserMode ?? "builtin",
++				browserAllowedDomains: this.normalizeStringList(capability.browserAllowedDomains),
++				browserBlockedDomains: this.normalizeStringList(capability.browserBlockedDomains),
++				browserAllowScreenshots: capability.browserAllowScreenshots ?? true,
++				browserAllowDownloads: capability.browserAllowDownloads ?? false,
++				browserRequireConfirmation: capability.browserRequireConfirmation ?? true,
++				browserMaxSteps: Number(capability.browserMaxSteps ?? 20),
++				browserTimeoutMs: Number(capability.browserTimeoutMs ?? 120000),
+ 				workingDirectory: capability.workingDirectory ?? "",
+ 				tokenEnv: capability.tokenEnv ?? "",
+ 				headersJson: capability.headersJson ?? "",
+ 				inputSchemaJson: capability.inputSchemaJson ?? "",
+ 				outputSchemaJson: capability.outputSchemaJson ?? "",
++				resultFormat: capability.resultFormat ?? "text",
++				resultMapping: capability.resultMapping ?? "",
++				costPolicy: capability.costPolicy ?? "free",
++				requiresConfirmation: capability.requiresConfirmation ?? false,
+ 				timeoutMs: Number(capability.timeoutMs ?? 600000),
+ 				retryCount: Number(capability.retryCount ?? 1),
+ 				enabled: Boolean(capability.enabled),
+@@ -473,6 +567,8 @@ export class ConfigService {
+ 			return [
+ 				{
+ 					id: "legacy-enterprise-api",
++					createdAt: new Date().toISOString(),
++					updatedAt: new Date().toISOString(),
+ 					name: "企业接口能力",
+ 					type: "tool",
+ 					category: "企业接口",
+@@ -484,11 +580,40 @@ export class ConfigService {
+ 					endpoint: legacyEnterpriseApiBaseUrl,
+ 					httpMethod: "POST",
+ 					command: "",
++					mcpServerName: "",
++					mcpUrl: "",
++					mcpTransport: "stream-http",
++					mcpAuthType: "none",
++					mcpApiKeyValue: "",
++					mcpHeadersJson: "",
++					mcpTools: [],
++					browserMode: "builtin",
++					browserAllowedDomains: [],
++					browserBlockedDomains: [],
++					browserAllowScreenshots: true,
++					browserAllowDownloads: false,
++					browserRequireConfirmation: true,
++					browserMaxSteps: 20,
++					browserTimeoutMs: 120000,
+ 					workingDirectory: "",
+ 					tokenEnv: "",
+ 					headersJson: "",
+ 					inputSchemaJson: "",
+ 					outputSchemaJson: "",
++					toolName: "legacy_enterprise_api",
++					useWhen: "",
++					avoidWhen: "",
++					httpBodyType: "json",
++					httpContentType: "application/json",
++					httpQueryParamsJson: "",
++					httpAuthType: "none",
++					httpAuthHeaderName: "Authorization",
++					httpAuthTokenEnv: "",
++					httpAuthTokenValue: "",
++					resultFormat: "text",
++					resultMapping: "",
++					costPolicy: "free",
++					requiresConfirmation: false,
+ 					timeoutMs: 600000,
+ 					retryCount: 1,
+ 					enabled: true,
+@@ -504,6 +629,21 @@ export class ConfigService {
+ 		return defaultCapabilities;
+ 	}
+ 
++	private normalizeMcpTools(tools: CapabilityConfig["mcpTools"] | undefined): CapabilityConfig["mcpTools"] {
++		return (tools ?? [])
++			.map((tool) => ({
++				name: tool.name?.trim() ?? "",
++				description: tool.description?.trim() ?? "",
++				inputSchemaJson: tool.inputSchemaJson?.trim() ?? "",
++				enabled: tool.enabled ?? true,
++			}))
++			.filter((tool) => tool.name.length > 0);
++	}
++
++	private normalizeStringList(values: string[] | undefined): string[] {
++		return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
++	}
++
+ 	private normalizeAgents(
+ 		agents: AgentConfig[] | undefined,
+ 		models: ModelProfileConfig[],
+diff --git a/packages/windows-client/src/preload/index.ts b/packages/windows-client/src/preload/index.ts
+index 48093f77..168057de 100644
+--- a/packages/windows-client/src/preload/index.ts
++++ b/packages/windows-client/src/preload/index.ts
+@@ -6,11 +6,13 @@ const api: WindowsClientApi = {
+ 	getEnvironment: () => ipcRenderer.invoke(IPC_CHANNELS.getEnvironment),
+ 	getClientConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configGet),
+ 	saveAgentCoreConfig: (agentCore) => ipcRenderer.invoke(IPC_CHANNELS.configSaveAgentCore, agentCore),
++	saveVariablesConfig: (variables) => ipcRenderer.invoke(IPC_CHANNELS.configSaveVariables, variables),
+ 	saveModelConfig: (model) => ipcRenderer.invoke(IPC_CHANNELS.configSaveModel, model),
+ 	deleteModelConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteModel, id),
+ 	testModelConfig: (model) => ipcRenderer.invoke(IPC_CHANNELS.configTestModel, model),
+ 	saveCapabilityConfig: (capability) => ipcRenderer.invoke(IPC_CHANNELS.configSaveCapability, capability),
+ 	deleteCapabilityConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteCapability, id),
++	discoverMcpTools: (capability) => ipcRenderer.invoke(IPC_CHANNELS.configDiscoverMcpTools, capability),
+ 	saveAgentConfig: (agent) => ipcRenderer.invoke(IPC_CHANNELS.configSaveAgent, agent),
+ 	deleteAgentConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteAgent, id),
+ 	resetClientConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configReset),
+diff --git a/packages/windows-client/src/renderer/src/App.tsx b/packages/windows-client/src/renderer/src/App.tsx
+index f0d6b5f2..8482c3ec 100644
+--- a/packages/windows-client/src/renderer/src/App.tsx
++++ b/packages/windows-client/src/renderer/src/App.tsx
+@@ -11,6 +11,7 @@ import {
+   Plus,
+   RefreshCw,
+   Save,
++  Search,
+   Send,
+   Settings,
+   ShieldCheck,
+@@ -36,6 +37,8 @@ import type {
+   WorkspaceFileInfo,
+   WorkspaceState,
+ } from '../../shared/types';
++import { highlightSearchText, searchConversations } from './conversation-search';
++import type { ConversationSearchMatch, SearchableConversation } from './conversation-search';
+ import './styles.css';
+ 
+ interface TranscriptItem {
+@@ -60,6 +63,14 @@ interface AgentConversationState {
+   workspace: WorkspaceState;
+ }
+ 
++interface SearchNavigationTarget {
++  matchId: string;
++  agentId: string;
++  conversationId: string;
++  messageIndex: number;
++  query: string;
++}
++
+ const auditPageSize = 100;
+ 
+ const auditActionLabels: Record<string, string> = {
+@@ -312,24 +323,49 @@ function createCapabilityId(): string {
+ }
+ 
+ function createCapabilityConfig(): CapabilityConfig {
++  const createdAt = new Date().toISOString();
+   return {
+     id: createCapabilityId(),
++    createdAt,
++    updatedAt: createdAt,
+     name: '未命名能力',
+     type: 'tool',
++    toolName: '',
+     category: '',
+     description: '',
++    useWhen: '',
++    avoidWhen: '',
+     content: '',
+     advancedConfig: '',
+     triggerMode: 'agent',
+     executionMode: 'http',
+     endpoint: '',
+     httpMethod: 'POST',
++    httpBodyType: 'json',
++    httpContentType: 'application/json',
++    httpQueryParamsJson: '',
++    httpAuthType: 'none',
++    httpAuthHeaderName: 'Authorization',
++    httpAuthTokenEnv: '',
++    httpAuthTokenValue: '',
+     command: '',
++    mcpServerName: '',
++    mcpUrl: '',
++    mcpTransport: 'stream-http',
++    mcpAuthType: 'none',
++    mcpApiKeyValue: '',
++    mcpHeadersJson: '',
++    mcpTools: [],
++    browserMode: 'builtin',
+     workingDirectory: '',
+     tokenEnv: '',
+     headersJson: '',
+     inputSchemaJson: '',
+     outputSchemaJson: '',
++    resultFormat: 'text',
++    resultMapping: '',
++    costPolicy: 'free',
++    requiresConfirmation: false,
+     timeoutMs: 600000,
+     retryCount: 1,
+     enabled: true,
+@@ -484,6 +520,33 @@ function formatDateTimeInput(date: Date): string {
+   return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+ }
+ 
++function formatLocalTimestamp(value: string): string {
++  const date = new Date(value);
++  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
++}
++
++function getMessageAnchorId(conversationId: string, messageIndex: number): string {
++  return `${conversationId}:${messageIndex}`;
++}
++
++function renderHighlightedText(text: string, query: string): ReactElement {
++  const segments = highlightSearchText(text, query);
++
++  return (
++    <>
++      {segments.map((segment, index) =>
++        segment.matched ? (
++          <mark className="search-highlight" key={`${segment.text}-${index}`}>
++            {segment.text}
++          </mark>
++        ) : (
++          <span key={`${segment.text}-${index}`}>{segment.text}</span>
++        ),
++      )}
++    </>
++  );
++}
++
+ function createDefaultAuditQuery(): AuditLogQuery {
+   const end = new Date();
+   const start = new Date(end);
+@@ -534,15 +597,19 @@ function App(): ReactElement {
+   const [agentNotice, setAgentNotice] = useState<LocalNotice | null>(null);
+   const [configNotice, setConfigNotice] = useState<LocalNotice | null>(null);
+   const [modelEditorNotice, setModelEditorNotice] = useState<LocalNotice | null>(null);
+-  const [activeSection, setActiveSection] = useState<'workbench' | 'workspace' | 'agent' | 'config' | 'logs'>(
++  const [activeSection, setActiveSection] = useState<'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs'>(
+     'workbench',
+   );
+   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+   const [conversationRevision, setConversationRevision] = useState(0);
+   const [startingConversationId, setStartingConversationId] = useState<string | null>(null);
++  const [searchQuery, setSearchQuery] = useState('');
++  const [searchAgentId, setSearchAgentId] = useState('');
++  const [searchNavigationTarget, setSearchNavigationTarget] = useState<SearchNavigationTarget | null>(null);
+   const agentConversationsRef = useRef<Record<string, AgentConversationState[]>>({});
+   const activeConversationIdsRef = useRef<Record<string, string>>({});
+   const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
++  const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
+   const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities'>(
+     'models',
+   );
+@@ -632,6 +699,56 @@ function App(): ReactElement {
+     [draftConfig?.agents],
+   );
+ 
++  const searchableConversations = useMemo<SearchableConversation[]>(() => {
++    const agentNameById = new Map((draftConfig?.agents ?? []).map((agent) => [agent.id, agent.name]));
++    return Object.entries(agentConversationsRef.current).flatMap(([agentId, conversations]) =>
++      conversations.map((conversation) => ({
++        agentId,
++        agentName: agentNameById.get(agentId) ?? '未命名智能体',
++        conversationId: conversation.id,
++        conversationTitle: conversation.title,
++        updatedAt: conversation.updatedAt,
++        transcript: conversation.transcript.map((item) => ({ ...item })),
++      })),
++    );
++  }, [draftConfig?.agents, conversationRevision]);
++
++  const searchableAgentOptions = useMemo(() => {
++    const agentSummaries = new Map<string, { id: string; name: string; conversationCount: number }>();
++    for (const conversation of searchableConversations) {
++      const existing = agentSummaries.get(conversation.agentId);
++      if (existing) {
++        existing.conversationCount += 1;
++        continue;
++      }
++      agentSummaries.set(conversation.agentId, {
++        id: conversation.agentId,
++        name: conversation.agentName,
++        conversationCount: 1,
++      });
++    }
++    return [...agentSummaries.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
++  }, [searchableConversations]);
++
++  const filteredSearchConversations = useMemo(
++    () =>
++      searchAgentId
++        ? searchableConversations.filter((conversation) => conversation.agentId === searchAgentId)
++        : searchableConversations,
++    [searchAgentId, searchableConversations],
++  );
++
++  const searchResults = useMemo(
++    () => searchConversations(searchQuery, filteredSearchConversations),
++    [filteredSearchConversations, searchQuery],
++  );
++
++  useEffect(() => {
++    if (searchAgentId && !searchableAgentOptions.some((agent) => agent.id === searchAgentId)) {
++      setSearchAgentId('');
++    }
++  }, [searchAgentId, searchableAgentOptions]);
++
+   const selectedAgent = useMemo(() => {
+     const agents = draftConfig?.agents ?? [];
+     return (
+@@ -692,6 +809,24 @@ function App(): ReactElement {
+     void startSession({ silent: true });
+   }, [selectedAgent?.id, selectedConversation.id, sessionReady, sessionStarting]);
+ 
++  useEffect(() => {
++    if (
++      !searchNavigationTarget ||
++      activeSection !== 'workbench' ||
++      searchNavigationTarget.conversationId !== selectedConversation.id
++    ) {
++      return;
++    }
++
++    const anchorId = getMessageAnchorId(searchNavigationTarget.conversationId, searchNavigationTarget.messageIndex);
++    const timer = window.setTimeout(() => {
++      const targetElement = messageElementRefs.current[anchorId];
++      targetElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
++    }, 0);
++
++    return () => window.clearTimeout(timer);
++  }, [activeSection, searchNavigationTarget, selectedConversation.id, transcript.length]);
++
+   function commitAgentConversation(agentId: string, conversation: AgentConversationState): void {
+     const nextConversation = {
+       ...conversation,
+@@ -763,6 +898,25 @@ function App(): ReactElement {
+     setConversationRevision((revision) => revision + 1);
+   }
+ 
++  function openSearchResult(match: ConversationSearchMatch): void {
++    activeConversationIdsRef.current = {
++      ...activeConversationIdsRef.current,
++      [match.agentId]: match.conversationId,
++    };
++    selectedAgentIdRef.current = match.agentId;
++    setSelectedAgentId(match.agentId);
++    setSearchNavigationTarget({
++      matchId: match.id,
++      agentId: match.agentId,
++      conversationId: match.conversationId,
++      messageIndex: match.messageIndex,
++      query: searchQuery,
++    });
++    setAgentNotice(null);
++    setActiveSection('workbench');
++    setConversationRevision((revision) => revision + 1);
++  }
++
+   async function refreshInitialState(): Promise<void> {
+     const initialAuditQuery = createDefaultAuditQuery();
+     const [nextEnvironment, nextConfig, nextWorkspace, nextTools, nextAudit] = await Promise.all([
+@@ -1611,6 +1765,9 @@ function App(): ReactElement {
+         : ''
+     : '';
+   const modelSuggestions = modelEditorPreset?.models ?? [];
++  const activeSearchScopeName = searchAgentId
++    ? searchableAgentOptions.find((agent) => agent.id === searchAgentId)?.name ?? '当前智能体'
++    : '全部智能体';
+ 
+   return (
+     <main className="app-shell">
+@@ -1633,6 +1790,13 @@ function App(): ReactElement {
+         >
+           工作台
+         </button>
++        <button
++          type="button"
++          className={activeSection === 'search' ? 'active' : ''}
++          onClick={() => setActiveSection('search')}
++        >
++          搜索
++        </button>
+         <button
+           type="button"
+           className={activeSection === 'config' ? 'active' : ''}
+@@ -1650,6 +1814,72 @@ function App(): ReactElement {
+       </nav>
+ 
+       <section className="dashboard-grid">
++        {activeSection === 'search' && (
++          <article className="panel wide-panel search-panel">
++            <div className="panel-heading">
++              <Search size={20} />
++              <h3>搜索</h3>
++            </div>
++
++            <div className="search-toolbar">
++              <label className="search-input-wrap">
++                <span>关键词</span>
++                <input
++                  value={searchQuery}
++                  onChange={(event) => setSearchQuery(event.target.value)}
++                  placeholder="搜索用户消息或智能体回复，支持短语、关键词和模糊匹配"
++                />
++              </label>
++              <label className="search-filter-wrap">
++                <span>智能体范围</span>
++                <select value={searchAgentId} onChange={(event) => setSearchAgentId(event.target.value)}>
++                  <option value="">全部智能体</option>
++                  {searchableAgentOptions.map((agent) => (
++                    <option value={agent.id} key={agent.id}>
++                      {agent.name} ({agent.conversationCount})
++                    </option>
++                  ))}
++                </select>
++              </label>
++            </div>
++
++            <div className="search-summary">
++              {!searchQuery.trim()
++                ? `当前可检索 ${searchableConversations.length} 个会话，默认覆盖全部智能体；结果按短语命中、关键词覆盖和模糊相关度综合排序。`
++                : `在 ${activeSearchScopeName} 中找到 ${searchResults.length} 条结果，已按相关性从高到低排序。`}
++            </div>
++
++            {searchableConversations.length === 0 ? (
++              <p className="empty-state search-empty-state">当前还没有可搜索的对话内容。</p>
++            ) : !searchQuery.trim() ? (
++              <p className="empty-state search-empty-state">输入关键词后即可搜索用户内容和智能体回复。</p>
++            ) : searchResults.length === 0 ? (
++              <p className="empty-state search-empty-state">没有找到匹配结果，试试更短的关键词或更换智能体范围。</p>
++            ) : (
++              <div className="search-results">
++                {searchResults.map((match) => (
++                  <button
++                    type="button"
++                    className={`search-result-item ${searchNavigationTarget?.matchId === match.id ? 'active' : ''}`}
++                    key={match.id}
++                    onClick={() => openSearchResult(match)}
++                  >
++                    <div className="search-result-header">
++                      <strong>{match.conversationTitle || '未命名会话'}</strong>
++                      <small>{formatLocalTimestamp(match.createdAt)}</small>
++                    </div>
++                    <div className="search-result-meta">
++                      <span>{match.agentName}</span>
++                      <span>{match.role === 'user' ? '用户消息' : '智能体回复'}</span>
++                    </div>
++                    <p className="search-result-snippet">{renderHighlightedText(match.snippet, searchQuery)}</p>
++                  </button>
++                ))}
++              </div>
++            )}
++          </article>
++        )}
++
+         {activeSection === 'workbench' && (
+           <article className={`panel wide-panel workbench-shell ${contextPanelOpen ? 'context-open' : ''}`}>
+             <div className="agent-tabs">
+@@ -1765,12 +1995,29 @@ function App(): ReactElement {
+                   {transcript.length === 0 ? (
+                     <p className="empty-state">选择智能体后即可开始对话，系统会自动准备会话。</p>
+                   ) : (
+-                    transcript.map((item) => (
+-                      <div className={`message-bubble ${item.role}`} key={`${item.createdAt}-${item.role}`}>
+-                        <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+-                        <span>{item.text}</span>
+-                      </div>
+-                    ))
++                    transcript.map((item, messageIndex) => {
++                      const targetMessageIndex = searchNavigationTarget?.messageIndex;
++                      const targetQuery = searchNavigationTarget?.query ?? '';
++                      const isSearchTarget =
++                        searchNavigationTarget?.conversationId === selectedConversation.id &&
++                        targetMessageIndex === messageIndex;
++                      const anchorId = getMessageAnchorId(selectedConversation.id, messageIndex);
++
++                      return (
++                        <div
++                          className={`message-bubble ${item.role}${isSearchTarget ? ' search-target' : ''}`}
++                          key={`${item.createdAt}-${item.role}-${messageIndex}`}
++                          ref={(node) => {
++                            messageElementRefs.current[anchorId] = node;
++                          }}
++                        >
++                          <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
++                          <span>
++                            {isSearchTarget ? renderHighlightedText(item.text, targetQuery) : item.text}
++                          </span>
++                        </div>
++                      );
++                    })
+                   )}
+                 </div>
+ 
+diff --git a/packages/windows-client/src/renderer/src/styles.css b/packages/windows-client/src/renderer/src/styles.css
+index 9628ce66..ca24a0ea 100644
+--- a/packages/windows-client/src/renderer/src/styles.css
++++ b/packages/windows-client/src/renderer/src/styles.css
+@@ -1,8 +1,26 @@
+ :root {
+-  color: #202124;
+-  background: #f6f5f2;
++  --color-bg: #f7f6f2;
++  --color-surface: #fffdf8;
++  --color-surface-soft: #f5f3ed;
++  --color-panel: #fbfaf6;
++  --color-border: #e7dfd4;
++  --color-border-strong: #d7cbbd;
++  --color-text: #202124;
++  --color-muted: #6d665d;
++  --color-faint: #9a9185;
++  --color-primary: #1f5a4f;
++  --color-primary-dark: #17453e;
++  --color-primary-soft: #e7f1eb;
++  --color-action: #2f4f6f;
++  --color-danger: #a24435;
++  --shadow-panel: 0 12px 34px rgb(40 35 28 / 6%);
++  --radius: 10px;
++  color: var(--color-text);
++  background: var(--color-bg);
+   font-family:
+-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
++    "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", Inter, ui-sans-serif, system-ui, -apple-system,
++    BlinkMacSystemFont, "Segoe UI", sans-serif;
++  font-size: 14px;
+   font-synthesis: none;
+   text-rendering: optimizeLegibility;
+ }
+@@ -15,6 +33,7 @@ body {
+   margin: 0;
+   min-width: 320px;
+   min-height: 100vh;
++  overflow: hidden;
+ }
+ 
+ button {
+@@ -78,12 +97,145 @@ select:focus {
+ }
+ 
+ .app-shell {
+-  margin: 0 auto;
+-  max-width: 1180px;
+-  padding: 28px;
++  display: grid;
++  grid-template-columns: 176px minmax(0, 1fr);
++  margin: 0;
++  max-width: none;
++  min-height: 100vh;
++  padding: 0;
++}
++
++.global-sidebar {
++  background: #fbfaf7;
++  border-right: 1px solid #e5ded5;
++  display: flex;
++  flex-direction: column;
++  gap: 14px;
++  height: 100vh;
++  padding: 12px 10px;
++  position: sticky;
++  top: 0;
++}
++
++.sidebar-brand {
++  align-items: center;
++  display: flex;
++  gap: 10px;
++  min-height: 42px;
++}
++
++.sidebar-brand strong {
++  color: #121721;
++  font-size: 18px;
++}
++
++.sidebar-actions,
++.sidebar-conversations {
++  display: flex;
++  flex-direction: column;
++}
++
++.sidebar-actions {
++  gap: 4px;
++}
++
++.sidebar-actions button,
++.sidebar-settings,
++.sidebar-thread {
++  align-items: center;
++  background: transparent;
++  border-radius: 6px;
++  color: #4f4a43;
++  display: flex;
++  gap: 8px;
++  justify-content: flex-start;
++  min-height: 34px;
++  padding: 7px 8px;
++  text-align: left;
++}
++
++.sidebar-actions button:hover,
++.sidebar-actions button.active,
++.sidebar-settings:hover,
++.sidebar-thread:hover,
++.sidebar-thread.active {
++  background: #e5eee8;
++  color: #1f4d45;
++}
++
++.sidebar-conversations {
++  flex: 1;
++  gap: 6px;
++  min-height: 0;
++  overflow-y: auto;
++  padding-right: 2px;
++}
++
++.sidebar-section-title {
++  color: #9a9389;
++  font-size: 12px;
++  margin-top: 6px;
++  padding: 4px 8px;
++}
++
++.sidebar-thread {
++  border: 1px solid transparent;
++  flex-direction: column;
++  gap: 2px;
++  min-height: 52px;
++}
++
++.sidebar-thread span,
++.sidebar-thread small {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  width: 100%;
++}
++
++.sidebar-thread.active {
++  border-color: #c9ded5;
++}
++
++.muted-thread {
++  color: #746e66;
++}
++
++.sidebar-empty {
++  color: #8a8177;
++  font-size: 13px;
++  margin: 4px 8px;
++}
++
++.sidebar-settings {
++  flex: 0 0 auto;
++}
++
++.app-main {
++  display: flex;
++  flex-direction: column;
++  height: 100vh;
++  min-height: 0;
++  min-width: 0;
++  overflow: hidden;
++  padding: 16px 20px 24px;
++}
++
++.main-topbar {
++  align-items: center;
++  background: #fffdfa;
++  border: 1px solid #e5ded5;
++  border-radius: 8px;
++  display: grid;
++  gap: 14px;
++  grid-template-columns: minmax(0, 1fr) auto auto;
++  margin-bottom: 14px;
++  min-height: 56px;
++  padding: 8px 12px;
+ }
+ 
+ .top-bar,
++.brand-lockup,
+ .panel-heading,
+ .tool-row,
+ .status-pill,
+@@ -95,10 +247,36 @@ select:focus {
+ }
+ 
+ .top-bar {
+-  align-items: flex-start;
+-  gap: 18px;
++  align-items: center;
++  background: #fffdfa;
++  border: 1px solid #e5ded5;
++  border-radius: 8px;
++  display: grid;
++  gap: 16px;
++  grid-template-columns: minmax(220px, auto) minmax(320px, 1fr) minmax(260px, auto);
+   justify-content: space-between;
+-  margin-bottom: 28px;
++  margin-bottom: 14px;
++  min-height: 64px;
++  padding: 10px 12px;
++}
++
++.brand-lockup {
++  gap: 12px;
++  min-width: 0;
++}
++
++.brand-mark {
++  align-items: center;
++  background: #1f4d45;
++  border-radius: 8px;
++  color: #fffdfa;
++  display: inline-flex;
++  flex: 0 0 auto;
++  font-size: 1.15rem;
++  font-weight: 900;
++  height: 42px;
++  justify-content: center;
++  width: 42px;
+ }
+ 
+ .eyebrow,
+@@ -119,9 +297,10 @@ p {
+ }
+ 
+ h1 {
+-  font-size: 2rem;
++  font-size: 1.42rem;
+   line-height: 1.1;
+   margin-bottom: 0;
++  white-space: nowrap;
+ }
+ 
+ h2 {
+@@ -149,7 +328,8 @@ p {
+   font-size: 0.9rem;
+   gap: 8px;
+   line-height: 1.45;
+-  max-width: min(760px, 68vw);
++  justify-self: end;
++  max-width: min(520px, 34vw);
+   min-height: 36px;
+   padding: 0 14px;
+   white-space: normal;
+@@ -191,13 +371,14 @@ p {
+ 
+ .domain-nav {
+   align-items: center;
+-  background: #fffdfa;
+-  border: 1px solid #e5ded5;
++  background: transparent;
++  border: 0;
+   border-radius: 8px;
+   display: flex;
+   gap: 8px;
+-  margin-bottom: 18px;
+-  padding: 8px;
++  justify-self: center;
++  margin-bottom: 0;
++  padding: 0;
+ }
+ 
+ .domain-nav button {
+@@ -229,8 +410,11 @@ p {
+ 
+ .dashboard-grid {
+   display: grid;
++  flex: 1;
+   gap: 18px;
+-  grid-template-columns: repeat(2, minmax(0, 1fr));
++  grid-template-columns: minmax(0, 1fr);
++  min-height: 0;
++  overflow: hidden;
+ }
+ 
+ .panel {
+@@ -263,6 +447,9 @@ p {
+ .workbench-shell {
+   display: grid;
+   gap: 16px;
++  grid-template-rows: auto minmax(0, 1fr);
++  min-height: 0;
++  overflow: hidden;
+   padding: 16px;
+ }
+ 
+@@ -296,14 +483,28 @@ p {
+   color: #1f4d45;
+ }
+ 
++.agent-tab-actions {
++  align-items: center;
++  display: flex;
++  flex: 0 0 auto;
++  gap: 8px;
++}
++
++.agent-tab-actions .compact-button {
++  min-height: 36px;
++  white-space: nowrap;
++}
++
+ .workbench-grid {
+   display: grid;
+   gap: 14px;
+-  grid-template-columns: 220px minmax(0, 1fr);
++  grid-template-columns: minmax(0, 1fr);
++  min-height: 0;
++  overflow: hidden;
+ }
+ 
+ .workbench-shell.context-open .workbench-grid {
+-  grid-template-columns: 210px minmax(0, 1fr) 320px;
++  grid-template-columns: minmax(0, 1fr) 340px;
+ }
+ 
+ .session-sidebar,
+@@ -415,9 +616,11 @@ p {
+ }
+ 
+ .chat-workspace {
+-  display: grid;
++  display: flex;
++  flex-direction: column;
+   gap: 12px;
+-  grid-template-rows: auto auto minmax(320px, 1fr) auto auto;
++  min-height: 0;
++  overflow: hidden;
+ }
+ 
+ .chat-header {
+@@ -434,7 +637,20 @@ p {
+ }
+ 
+ .focused-conversation {
+-  min-height: 320px;
++  flex: 1;
++  min-height: 0;
++  overflow-y: auto;
++}
++
++.workbench-footer {
++  background: linear-gradient(180deg, rgb(251 250 246 / 88%), var(--color-panel) 18px);
++  display: grid;
++  flex: 0 0 auto;
++  gap: 10px;
++  padding-top: 8px;
++  position: sticky;
++  bottom: 0;
++  z-index: 2;
+ }
+ 
+ .workbench-actions {
+@@ -554,11 +770,117 @@ p {
+   min-height: 300px;
+ }
+ 
++.mcp-config-panel,
++.browser-config-panel,
++.tool-config-panel {
++  background: #f5fbf8;
++  border: 1px solid #cfe5dd;
++  border-radius: 8px;
++  display: grid;
++  gap: 14px;
++  padding: 14px;
++}
++
++.secret-input-row {
++  align-items: stretch;
++  display: grid;
++  gap: 8px;
++  grid-template-columns: minmax(0, 1fr) 52px;
++}
++
++.secret-input-row input {
++  min-width: 0;
++}
++
++.secret-toggle-button {
++  align-items: center;
++  background: #ece8e1;
++  border: 1px solid #d9d1c7;
++  border-radius: 8px;
++  color: #174f45;
++  display: inline-flex;
++  justify-content: center;
++  min-height: 44px;
++  padding: 0;
++}
++
++.secret-toggle-button:hover {
++  background: #ded7cd;
++}
++
++.mcp-tool-list {
++  display: grid;
++  gap: 10px;
++}
++
++.mcp-tool-row {
++  align-items: center;
++  background: #fffdfa;
++  border: 1px solid #e5ded5;
++  border-radius: 8px;
++  display: grid;
++  gap: 10px;
++  grid-template-columns: 90px minmax(220px, 0.8fr) minmax(260px, 1fr);
++  padding: 10px;
++}
++
++.compact-checkbox {
++  min-height: auto;
++  padding: 0;
++}
++
++.variable-list {
++  display: grid;
++  gap: 10px;
++}
++
++.tool-variable-panel {
++  background: #fffdfa;
++  border: 1px solid #e5ded5;
++  border-radius: 8px;
++  display: grid;
++  gap: 10px;
++  padding: 12px;
++}
++
++.compact-title {
++  gap: 12px;
++  margin: 0;
++}
++
++.compact-variable-list .empty-state {
++  margin: 0;
++}
++
++.variable-row {
++  align-items: end;
++  background: #f8f6f1;
++  border: 1px solid #ebe4db;
++  border-radius: 8px;
++  display: grid;
++  gap: 10px;
++  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1fr) minmax(220px, 1fr) auto;
++  padding: 12px;
++}
++
++.variable-row label {
++  display: grid;
++  gap: 8px;
++  min-width: 0;
++}
++
++.variable-row label span {
++  color: #6b6258;
++  font-size: 0.82rem;
++  font-weight: 800;
++}
++
+ .advanced-capability-box {
+   background: #fffdfa;
+   border: 1px solid #e5ded5;
+   border-radius: 8px;
+   padding: 12px;
++  position: static;
+ }
+ 
+ .advanced-capability-box summary {
+@@ -568,6 +890,14 @@ p {
+   margin-bottom: 10px;
+ }
+ 
++.advanced-capability-box:not([open]) summary {
++  margin-bottom: 0;
++}
++
++.advanced-capability-box > .field-hint {
++  margin: 2px 0 12px;
++}
++
+ dl {
+   display: grid;
+   gap: 12px;
+@@ -642,6 +972,8 @@ dd {
+ }
+ 
+ .conversation-list {
++  align-content: start;
++  align-items: start;
+   background: #f8f6f1;
+   border: 1px solid #ebe4db;
+   border-radius: 8px;
+@@ -658,6 +990,7 @@ dd {
+ }
+ 
+ .message-bubble {
++  align-self: start;
+   border-radius: 8px;
+   display: grid;
+   gap: 4px;
+@@ -673,41 +1006,241 @@ dd {
+   overflow-wrap: anywhere;
+ }
+ 
+-.message-bubble.user {
+-  background: #dceae3;
+-  justify-self: end;
++.markdown-message {
++  display: grid;
++  gap: 10px;
++  min-width: 0;
++  overflow-wrap: anywhere;
+ }
+ 
+-.message-bubble.assistant {
+-  background: #fffdfa;
+-  border: 1px solid #e5ded5;
++.markdown-message > :first-child {
++  margin-top: 0;
+ }
+ 
+-.composer {
+-  align-items: stretch;
+-  gap: 10px;
++.markdown-message > :last-child {
++  margin-bottom: 0;
+ }
+ 
+-.composer button {
+-  align-self: stretch;
++.markdown-message p,
++.markdown-message ul,
++.markdown-message ol,
++.markdown-message blockquote,
++.markdown-message pre,
++.markdown-message table,
++.markdown-message h1,
++.markdown-message h2,
++.markdown-message h3,
++.markdown-message h4,
++.markdown-message h5,
++.markdown-message h6 {
++  margin-bottom: 0;
+ }
+ 
+-.file-browser {
+-  display: grid;
+-  gap: 14px;
+-  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.4fr);
++.markdown-message h1,
++.markdown-message h2,
++.markdown-message h3,
++.markdown-message h4,
++.markdown-message h5,
++.markdown-message h6 {
++  color: #1f4d45;
++  line-height: 1.35;
++  white-space: normal;
+ }
+ 
+-.file-list,
+-.audit-list {
+-  display: grid;
+-  align-content: start;
+-  gap: 8px;
+-  max-height: 360px;
+-  overflow: auto;
++.markdown-message h1 {
++  font-size: 1.08rem;
+ }
+ 
+-.file-row {
++.markdown-message h2,
++.markdown-message h3 {
++  font-size: 1rem;
++}
++
++.markdown-message h4,
++.markdown-message h5,
++.markdown-message h6 {
++  font-size: 0.95rem;
++}
++
++.markdown-message p {
++  color: inherit;
++  margin-top: 0;
++  white-space: normal;
++}
++
++.markdown-message a {
++  color: #235f8d;
++  font-weight: 800;
++  text-decoration: underline;
++  text-underline-offset: 2px;
++}
++
++.markdown-message code {
++  background: #f0eee9;
++  border: 1px solid #e5ded5;
++  border-radius: 6px;
++  color: #1f3130;
++  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
++  font-size: 0.86em;
++  padding: 1px 5px;
++}
++
++.markdown-message ul,
++.markdown-message ol {
++  display: grid;
++  gap: 6px;
++  margin-top: 0;
++  padding-left: 22px;
++}
++
++.markdown-message li {
++  line-height: 1.55;
++}
++
++.markdown-message li > input[type="checkbox"] {
++  margin-right: 8px;
++  min-height: auto;
++  vertical-align: middle;
++  width: auto;
++}
++
++.markdown-message blockquote {
++  border-left: 4px solid #c8dbd1;
++  color: #5b5751;
++  display: grid;
++  gap: 8px;
++  padding-left: 12px;
++}
++
++.markdown-message hr {
++  border: 0;
++  border-top: 1px solid #e5ded5;
++  margin: 2px 0;
++}
++
++.markdown-code-block {
++  background: #1f2527;
++  border: 1px solid #30383a;
++  border-radius: 8px;
++  color: #eef4f1;
++  display: grid;
++  min-width: 0;
++  overflow: hidden;
++}
++
++.markdown-code-toolbar {
++  align-items: center;
++  background: #2b3335;
++  border-bottom: 1px solid #3b4446;
++  color: #c9d5d0;
++  display: flex;
++  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
++  font-size: 0.78rem;
++  justify-content: space-between;
++  min-height: 34px;
++  padding: 0 8px 0 12px;
++}
++
++.markdown-copy-button {
++  background: transparent;
++  color: #eef4f1;
++  font-size: 0.78rem;
++  gap: 6px;
++  min-height: 28px;
++  padding: 0 8px;
++}
++
++.markdown-copy-button:hover {
++  background: rgb(255 255 255 / 10%);
++}
++
++.markdown-code-block pre {
++  margin: 0;
++  overflow: auto;
++  padding: 12px;
++}
++
++.markdown-code-block code {
++  background: transparent;
++  border: 0;
++  color: inherit;
++  display: block;
++  font-size: 0.84rem;
++  line-height: 1.6;
++  padding: 0;
++  white-space: pre;
++}
++
++.markdown-table-wrap {
++  max-width: 100%;
++  overflow: auto;
++}
++
++.markdown-message table {
++  border-collapse: collapse;
++  font-size: 0.92rem;
++  min-width: 360px;
++  width: 100%;
++}
++
++.markdown-message th,
++.markdown-message td {
++  border: 1px solid #d9d1c7;
++  padding: 8px 10px;
++  vertical-align: top;
++}
++
++.markdown-message th {
++  background: #f0eee9;
++  color: #1f4d45;
++  font-weight: 900;
++}
++
++.markdown-image {
++  border: 1px solid #e5ded5;
++  border-radius: 8px;
++  display: block;
++  height: auto;
++  max-height: 360px;
++  max-width: 100%;
++  object-fit: contain;
++}
++
++.message-bubble.user {
++  background: #dceae3;
++  justify-self: end;
++}
++
++.message-bubble.assistant {
++  background: #fffdfa;
++  border: 1px solid #e5ded5;
++}
++
++.composer {
++  align-items: stretch;
++  gap: 10px;
++}
++
++.composer button {
++  align-self: stretch;
++}
++
++.file-browser {
++  display: grid;
++  gap: 14px;
++  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.4fr);
++}
++
++.file-list,
++.audit-list {
++  display: grid;
++  align-content: start;
++  gap: 8px;
++  max-height: 360px;
++  overflow: auto;
++}
++
++.file-row {
+   align-items: center;
+   background: #f8f6f1;
+   border: 1px solid #ebe4db;
+@@ -800,6 +1333,35 @@ dd {
+   overflow-wrap: anywhere;
+ }
+ 
++.storage-summary {
++  color: #5b5751;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px 14px;
++  line-height: 1.55;
++  margin-bottom: 18px;
++}
++
++.technical-details {
++  color: #6b6258;
++}
++
++.technical-details summary {
++  color: #1f4d45;
++  cursor: pointer;
++  font-weight: 800;
++}
++
++.technical-details p {
++  background: #f0eee9;
++  border-radius: 6px;
++  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
++  font-size: 0.8rem;
++  margin: 8px 0 0;
++  overflow-wrap: anywhere;
++  padding: 8px 10px;
++}
++
+ .audit-row {
+   align-items: center;
+   background: #f8f6f1;
+@@ -811,6 +1373,23 @@ dd {
+   padding: 12px;
+ }
+ 
++.audit-summary {
++  display: grid;
++  gap: 4px;
++  min-width: 0;
++}
++
++.audit-summary small {
++  color: #1f4d45;
++  font-weight: 800;
++  overflow-wrap: anywhere;
++}
++
++.audit-summary p {
++  margin: 0;
++  overflow-wrap: anywhere;
++}
++
+ .audit-row p {
+   margin: 0;
+   overflow-wrap: anywhere;
+@@ -885,6 +1464,12 @@ dd {
+   font-weight: 800;
+ }
+ 
++.settings-grid label span.required-star,
++.model-form-layout label span.required-star,
++.model-form-layout strong span.required-star {
++  color: #c7352f;
++}
++
+ .model-form-layout {
+   display: grid;
+   gap: 14px;
+@@ -975,10 +1560,19 @@ dd {
+   border-radius: 8px;
+   display: grid;
+   gap: 10px;
+-  grid-template-columns: minmax(180px, 1.2fr) minmax(54px, 0.35fr) minmax(90px, 0.55fr) minmax(110px, 0.7fr) minmax(70px, 0.45fr) minmax(70px, 0.45fr) auto;
++  grid-template-columns: minmax(180px, 1.25fr) minmax(54px, 0.35fr) minmax(90px, 0.55fr) minmax(110px, 0.65fr) minmax(90px, 0.55fr) minmax(70px, 0.45fr) minmax(70px, 0.45fr) auto;
+   padding: 12px;
+ }
+ 
++.capability-table-header {
++  background: transparent;
++  border-color: transparent;
++  color: #6b6258;
++  font-size: 0.78rem;
++  font-weight: 900;
++  padding-bottom: 0;
++}
++
+ .capability-row div:first-child {
+   display: grid;
+   gap: 3px;
+@@ -1004,6 +1598,45 @@ dd {
+   grid-template-columns: repeat(6, minmax(0, 1fr));
+ }
+ 
++.capability-list-meta,
++.capability-pagination {
++  align-items: center;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 10px;
++  justify-content: space-between;
++}
++
++.capability-list-meta {
++  color: #6b6258;
++  font-size: 0.9rem;
++  margin: 14px 0 10px;
++}
++
++.capability-list-meta label,
++.capability-pagination label {
++  align-items: center;
++  display: inline-flex;
++  gap: 8px;
++}
++
++.capability-list-meta select,
++.capability-pagination input {
++  min-height: 34px;
++  width: 96px;
++}
++
++.capability-pagination {
++  justify-content: flex-end;
++  margin-top: 14px;
++}
++
++.capability-pagination > span {
++  color: #6b6258;
++  font-weight: 800;
++  margin-right: auto;
++}
++
+ .field-filters label {
+   display: grid;
+   gap: 6px;
+@@ -1076,14 +1709,30 @@ dd {
+   display: flex;
+   font-weight: 800;
+   gap: 8px;
++  min-width: 0;
+ }
+ 
+ .checkbox-row input {
+   accent-color: #1f4d45;
++  flex: 0 0 auto;
+   min-height: 18px;
+   width: 18px;
+ }
+ 
++.model-form-layout label.checkbox-row,
++.settings-grid label.checkbox-row {
++  align-items: center;
++  display: flex;
++  flex-direction: row;
++  gap: 8px;
++}
++
++.model-form-layout label.checkbox-row span,
++.settings-grid label.checkbox-row span {
++  min-width: 0;
++  overflow-wrap: anywhere;
++}
++
+ .checklist-box {
+   background: #f8f6f1;
+   border: 1px solid #ebe4db;
+@@ -1095,6 +1744,58 @@ dd {
+   padding: 14px;
+ }
+ 
++.agent-selector-box {
++  align-content: start;
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
++  max-height: none;
++  min-height: auto;
++  overflow: visible;
++}
++
++.agent-selector-box .checkbox-row {
++  background: transparent;
++  border: 0;
++  border-radius: 6px;
++  min-height: 28px;
++  padding: 3px 4px;
++}
++
++.agent-selector-box .checkbox-row:hover {
++  background: #efeae1;
++}
++
++.agent-selector-box > strong,
++.agent-selector-box > .empty-state {
++  grid-column: 1 / -1;
++}
++
++.capability-agent-selector {
++  background: #f8f6f1;
++  border: 1px solid #ebe4db;
++  border-radius: 8px;
++  display: grid;
++  gap: 12px;
++  padding: 14px;
++  position: static;
++}
++
++.agent-chip-list {
++  align-items: center;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 10px 22px;
++}
++
++.capability-agent-selector .agent-chip {
++  background: transparent;
++  border: 0;
++  border-radius: 0;
++  flex: 0 1 auto;
++  min-height: 24px;
++  padding: 0;
++}
++
+ .checklist-box > strong {
+   color: #123f38;
+ }
+@@ -1111,6 +1812,12 @@ dd {
+   min-height: 42px;
+ }
+ 
++.reasoning-settings {
++  display: grid;
++  gap: 10px;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++}
++
+ .form-checkbox {
+   align-content: center;
+   background: #f8f6f1;
+@@ -1131,25 +1838,100 @@ dd {
+   z-index: 10;
+ }
+ 
+-.modal-panel {
+-  background: #fffdfa;
+-  border: 1px solid #e5ded5;
+-  border-radius: 8px;
++.settings-overlay {
++  align-items: stretch;
++  background: rgb(32 33 36 / 34%);
++  display: flex;
++  inset: 0;
++  justify-content: center;
++  padding: 18px;
++  position: fixed;
++  z-index: 9;
++}
++
++.settings-panel {
+   box-shadow: 0 24px 80px rgb(32 33 36 / 22%);
++  display: flex;
++  flex-direction: column;
++  max-height: calc(100vh - 36px);
++  max-width: none;
++  min-height: 0;
++  overflow: hidden;
++  width: min(1560px, 100%);
++}
++
++.settings-panel > .panel-heading,
++.settings-panel > .storage-summary,
++.settings-panel > .inline-notice {
++  flex: 0 0 auto;
++}
++
++.settings-overlay .settings-stack {
++  align-items: start;
+   display: grid;
+-  gap: 16px;
++  flex: 1 1 auto;
++  grid-template-columns: 210px minmax(0, 1fr);
++  min-height: 0;
++  overflow: auto;
++}
++
++.settings-overlay .config-tabs {
++  align-self: start;
++  flex-direction: column;
++  position: sticky;
++  top: 0;
++}
++
++.settings-overlay .config-tabs button {
++  flex: 0 0 auto;
++  justify-content: flex-start;
++}
++
++.settings-overlay .config-block {
++  border-top: 0;
++  min-width: 0;
++  padding-top: 0;
++}
++
++.modal-panel {
++  background: #fffdfa;
++  border: 1px solid #e5ded5;
++  border-radius: 8px;
++  box-shadow: 0 24px 80px rgb(32 33 36 / 22%);
++  display: flex;
++  flex-direction: column;
+   max-height: calc(100vh - 48px);
+-  max-width: 980px;
++  max-width: 1180px;
++  overflow: hidden;
++  width: min(1180px, 100%);
++}
++
++.modal-panel > .panel-heading {
++  flex: 0 0 auto;
++  padding: 20px 20px 14px;
++}
++
++.modal-panel > .inline-notice {
++  flex: 0 0 auto;
++  margin: 0 20px 14px;
++}
++
++.modal-panel > .model-form-layout {
++  flex: 1 1 auto;
++  min-height: 0;
+   overflow: auto;
+-  padding: 20px;
+-  width: min(980px, 100%);
++  padding: 0 20px 20px;
+ }
+ 
+ .modal-actions {
+   align-items: center;
++  background: #fffdfa;
++  border-top: 1px solid #ebe4db;
+   display: flex;
++  flex: 0 0 auto;
+   gap: 10px;
+   justify-content: flex-end;
++  padding: 14px 20px 20px;
+ }
+ 
+ .modal-close-button {
+@@ -1175,7 +1957,7 @@ dd {
+ }
+ 
+ .tool-list {
+-  display: grid;
++  display: none;
+   gap: 10px;
+ }
+ 
+@@ -1260,56 +2042,1278 @@ dd {
+   color: #6b6258;
+ }
+ 
+-@media (max-width: 760px) {
+-  .app-shell {
+-    padding: 18px;
+-  }
++/* Visual baseline refresh for the Sinan desktop client. */
++body {
++  background:
++    radial-gradient(circle at top left, rgb(31 90 79 / 5%), transparent 34vw),
++    var(--color-bg);
++  color: var(--color-text);
++}
+ 
+-  .top-bar,
+-  .domain-nav,
+-  .section-title-row {
+-    align-items: stretch;
+-    flex-direction: column;
+-    gap: 16px;
+-  }
++button {
++  border-radius: 7px;
++  font-size: 0.92rem;
++  font-weight: 700;
++  min-height: 38px;
++  padding: 0 13px;
++}
+ 
+-  .dashboard-grid,
+-  dl {
+-    grid-template-columns: 1fr;
+-  }
++textarea,
++input,
++select {
++  background: var(--color-surface);
++  border-color: var(--color-border);
++  border-radius: 8px;
++  font-size: 0.92rem;
++}
+ 
+-  .composer {
+-    flex-direction: column;
+-  }
++textarea:focus,
++input:focus,
++select:focus {
++  border-color: var(--color-primary);
++  outline: 3px solid rgb(31 90 79 / 13%);
++}
+ 
+-  .file-browser,
+-  .audit-row,
+-  .audit-filters,
+-  .capability-row,
+-  .model-row,
+-  .model-toolbar,
+-  .workbench-grid,
+-  .workbench-shell.context-open .workbench-grid,
+-  .config-tabs,
+-  .settings-grid,
+-  .model-form-layout {
+-    grid-template-columns: 1fr;
+-  }
++.app-shell {
++  grid-template-columns: 216px minmax(0, 1fr);
++}
+ 
+-  .agent-tabs,
+-  .chat-header,
+-  .workbench-actions,
+-  .file-panel-actions {
+-    align-items: stretch;
+-    flex-direction: column;
+-  }
++.global-sidebar {
++  background: rgb(251 250 246 / 94%);
++  border-right-color: var(--color-border);
++  gap: 12px;
++  padding: 14px 12px;
++}
+ 
+-  .modal-actions {
+-    align-items: stretch;
+-    flex-direction: column;
+-  }
++.sidebar-brand {
++  gap: 11px;
++  min-height: 48px;
++  padding: 0 4px 6px;
++}
+ 
+-  .message-bubble {
+-    max-width: 100%;
++.sidebar-brand .brand-mark {
++  border-radius: 11px;
++  box-shadow: inset 0 -8px 18px rgb(0 0 0 / 10%);
++  height: 40px;
++  width: 40px;
++}
++
++.sidebar-brand strong {
++  font-size: 1.22rem;
++  letter-spacing: 0;
++}
++
++.sidebar-actions {
++  border-bottom: 1px solid var(--color-border);
++  gap: 2px;
++  padding-bottom: 12px;
++}
++
++.sidebar-actions button,
++.sidebar-settings {
++  border-radius: 8px;
++  color: var(--color-muted);
++  font-size: 0.92rem;
++  min-height: 36px;
++  padding: 0 10px;
++}
++
++.sidebar-actions button:hover,
++.sidebar-actions button.active,
++.sidebar-settings:hover {
++  background: var(--color-primary-soft);
++  color: var(--color-primary);
++}
++
++.sidebar-conversations {
++  gap: 7px;
++  padding: 2px 2px 2px 0;
++}
++
++.sidebar-section-title {
++  color: var(--color-faint);
++  font-size: 0.76rem;
++  font-weight: 700;
++  margin-top: 8px;
++  padding: 3px 8px;
++}
++
++.sidebar-thread {
++  border-color: transparent;
++  border-radius: 9px;
++  color: var(--color-muted);
++  min-height: 58px;
++  padding: 10px 11px;
++}
++
++.sidebar-thread span {
++  color: var(--color-text);
++  font-size: 0.92rem;
++  font-weight: 700;
++}
++
++.sidebar-thread small {
++  color: var(--color-faint);
++  font-size: 0.78rem;
++}
++
++.sidebar-thread:hover,
++.sidebar-thread.active {
++  background: var(--color-surface);
++  border-color: #cfe0d7;
++  box-shadow: 0 8px 20px rgb(31 90 79 / 7%);
++}
++
++.sidebar-settings {
++  border-top: 1px solid var(--color-border);
++  padding-top: 12px;
++}
++
++.app-main {
++  padding: 12px 16px 18px;
++}
++
++.main-topbar {
++  background: rgb(255 253 248 / 92%);
++  border-color: var(--color-border);
++  border-radius: 10px;
++  box-shadow: var(--shadow-panel);
++  gap: 10px;
++  min-height: 54px;
++  padding: 7px 10px;
++}
++
++.agent-tab-list {
++  gap: 4px;
++}
++
++.agent-tab-list button {
++  border-radius: 8px;
++  color: var(--color-muted);
++  font-size: 0.95rem;
++  font-weight: 800;
++  min-height: 36px;
++  padding: 0 13px;
++}
++
++.agent-tab-list button:hover,
++.agent-tab-list button.active {
++  background: var(--color-primary-soft);
++  color: var(--color-primary);
++}
++
++.agent-tab-actions {
++  gap: 6px;
++}
++
++.agent-tab-actions .compact-button {
++  color: var(--color-muted);
++  font-size: 0.86rem;
++  min-height: 34px;
++}
++
++.session-status-indicator {
++  align-items: center;
++  display: inline-flex;
++  justify-content: center;
++  justify-self: end;
++  min-height: 34px;
++  min-width: 34px;
++}
++
++.status-indicator-dot {
++  border-radius: 999px;
++  display: inline-block;
++  height: 10px;
++  width: 10px;
++}
++
++.status-indicator-dot.ready {
++  background: #2f8a57;
++  box-shadow: 0 0 0 4px rgb(47 138 87 / 12%);
++}
++
++.status-indicator-dot.idle {
++  background: #a59d92;
++  box-shadow: 0 0 0 4px rgb(165 157 146 / 12%);
++}
++
++.status-indicator-dot.error {
++  background: var(--color-danger);
++  box-shadow: 0 0 0 4px rgb(162 68 53 / 12%);
++}
++
++.status-indicator-dot.busy {
++  animation: runtime-pulse 1.05s ease-in-out infinite;
++}
++
++.status-pill {
++  background: #edf5ef;
++  border-color: #cde1d5;
++  color: var(--color-primary);
++  font-size: 0.86rem;
++  min-height: 34px;
++  padding: 0 12px;
++}
++
++.dashboard-grid {
++  align-items: stretch;
++  gap: 12px;
++  grid-auto-rows: minmax(0, 1fr);
++  height: 100%;
++  min-height: 0;
++}
++
++.panel {
++  background: rgb(255 253 248 / 90%);
++  border-color: var(--color-border);
++  border-radius: 10px;
++  box-shadow: var(--shadow-panel);
++  padding: 16px;
++}
++
++.wide-panel {
++  min-height: 0;
++}
++
++.workbench-shell {
++  display: grid;
++  gap: 14px;
++  grid-template-rows: minmax(0, 1fr);
++  height: 100%;
++  min-height: 0;
++  overflow: hidden;
++  padding: 14px;
++}
++
++.workbench-grid {
++  height: 100%;
++  min-height: 0;
++}
++
++.chat-workspace,
++.context-panel,
++.session-sidebar {
++  background: var(--color-panel);
++  border-color: var(--color-border);
++  border-radius: 10px;
++}
++
++.chat-workspace {
++  display: flex;
++  flex-direction: column;
++  height: 100%;
++  min-height: 0;
++  overflow: hidden;
++}
++
++.chat-header {
++  border-bottom: 1px solid var(--color-border);
++  padding-bottom: 10px;
++}
++
++.chat-header-main {
++  display: grid;
++  gap: 6px;
++}
++
++.chat-header-title-row {
++  align-items: center;
++  display: flex;
++  gap: 8px;
++}
++
++.chat-header strong {
++  color: var(--color-text);
++  font-size: 1.05rem;
++}
++
++.session-status-indicator-inline {
++  justify-self: auto;
++  min-height: 20px;
++  min-width: 20px;
++}
++
++.chat-header span,
++.context-summary span,
++.compact-title span {
++  color: var(--color-muted);
++  font-size: 0.84rem;
++}
++
++.inline-notice {
++  border-radius: 8px;
++  font-size: 0.9rem;
++  font-weight: 700;
++  padding: 9px 11px;
++}
++
++.conversation-list {
++  align-content: start;
++  align-items: start;
++  background: #fbfaf6;
++  border-color: transparent;
++  flex: 1 1 auto;
++  gap: 14px;
++  margin-bottom: 0;
++  min-height: 0;
++  overflow-y: auto;
++  padding: 16px 10px;
++}
++
++.focused-conversation {
++  flex: 1 1 auto;
++  min-height: 0;
++}
++
++.conversation-list.is-empty {
++  align-content: center;
++  justify-items: center;
++}
++
++.conversation-list.is-empty .empty-state {
++  color: var(--color-muted);
++  margin: 0;
++  text-align: center;
++}
++
++.message-bubble {
++  border-radius: 11px;
++  gap: 7px;
++  line-height: 1.62;
++  max-width: min(780px, 76%);
++  padding: 12px 14px;
++}
++
++.message-bubble strong {
++  color: var(--color-muted);
++  font-size: 0.78rem;
++  font-weight: 800;
++}
++
++.message-bubble.user {
++  background: #dcebe5;
++  color: #14251f;
++}
++
++.message-bubble.assistant {
++  background: var(--color-surface);
++  border-color: var(--color-border);
++  box-shadow: 0 8px 22px rgb(40 35 28 / 4%);
++}
++
++.markdown-message {
++  font-size: 0.97rem;
++}
++
++.markdown-message p,
++.markdown-message li {
++  line-height: 1.7;
++}
++
++.markdown-code-block,
++.markdown-table-wrap {
++  border-radius: 9px;
++}
++
++.workbench-actions {
++  align-items: center;
++  gap: 8px;
++  justify-content: space-between;
++}
++
++.agent-runtime-state {
++  background: var(--color-surface);
++  border-color: var(--color-border);
++  border-radius: 999px;
++  font-size: 0.9rem;
++  min-height: 36px;
++  padding: 0 12px;
++}
++
++.agent-runtime-state.running {
++  background: #eef4fa;
++  border-color: #c9dceb;
++  color: #294a66;
++}
++
++.agent-runtime-state.error {
++  background: #fff1ed;
++  border-color: #efc6b8;
++  color: var(--color-danger);
++}
++
++.status-dot.running {
++  animation: runtime-pulse 1.05s ease-in-out infinite;
++  background: #2f6f9f;
++  box-shadow: 0 0 0 3px rgb(47 111 159 / 12%);
++}
++
++.status-dot.error {
++  background: var(--color-danger);
++  box-shadow: 0 0 0 3px rgb(162 68 53 / 12%);
++}
++
++@keyframes runtime-pulse {
++  0% {
++    transform: scale(0.9);
++    opacity: 0.65;
++  }
++
++  50% {
++    transform: scale(1.25);
++    opacity: 1;
++  }
++
++  100% {
++    transform: scale(0.9);
++    opacity: 0.65;
++  }
++}
++
++.workbench-footer {
++  background: linear-gradient(180deg, rgb(251 250 246 / 0%), var(--color-panel) 18px);
++  border-top: 1px solid rgb(231 223 212 / 72%);
++  display: grid;
++  flex: 0 0 auto;
++  gap: 8px;
++  padding-top: 10px;
++  position: static;
++}
++
++.workbench-composer {
++  align-items: stretch;
++  background: var(--color-surface);
++  border: 1px solid var(--color-border);
++  border-radius: 20px;
++  box-shadow: 0 12px 28px rgb(40 35 28 / 5%);
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  margin: 0 auto;
++  max-width: 1120px;
++  padding: 12px 14px;
++  width: 100%;
++}
++
++.workbench-composer.has-task-template {
++  grid-template-columns: none;
++}
++
++.composer-bottom-bar,
++.composer-bottom-left,
++.composer-bottom-right {
++  align-items: center;
++  display: flex;
++  gap: 8px;
++  min-width: 0;
++}
++
++.composer-bottom-bar {
++  justify-content: space-between;
++}
++
++.composer-bottom-left {
++  flex: 1 1 auto;
++  flex-wrap: wrap;
++}
++
++.composer-bottom-right {
++  flex: 0 0 auto;
++}
++
++.composer-tool-button {
++  align-items: center;
++  background: #f0ede8;
++  border: 0;
++  border-radius: 999px;
++  color: var(--color-muted);
++  display: inline-flex;
++  font-size: 0.82rem;
++  font-weight: 800;
++  gap: 6px;
++  min-height: 34px;
++  padding: 0 11px;
++}
++
++.composer-tool-button:hover:not(:disabled) {
++  background: #e5eee8;
++  color: var(--color-primary);
++}
++
++.composer-tool-button:disabled {
++  cursor: not-allowed;
++  opacity: 0.56;
++}
++
++.task-template-select {
++  min-width: 0;
++  width: 210px;
++}
++
++.task-template-slot {
++  align-items: stretch;
++  display: flex;
++  min-width: 0;
++}
++
++.workbench-composer textarea {
++  border: 0;
++  max-height: 160px;
++  min-height: 48px;
++  padding: 8px 6px;
++  resize: none;
++}
++
++.workbench-composer textarea:focus {
++  outline: 0;
++}
++
++.composer-send-button {
++  align-items: center;
++  border-radius: 999px;
++  display: inline-flex;
++  font-size: 0.96rem;
++  gap: 7px;
++  justify-content: center;
++  min-height: 40px;
++  min-width: 88px;
++  padding: 0 18px;
++}
++
++.composer-send-button.stop {
++  background: var(--color-danger);
++}
++
++.composer-send-button.stop:hover:not(:disabled) {
++  background: #8b3729;
++}
++
++.context-panel {
++  align-content: start;
++}
++
++.context-summary,
++.prompt-context-preview,
++.file-preview {
++  background: var(--color-surface);
++  border-color: var(--color-border);
++}
++
++.settings-overlay {
++  background: rgb(25 28 28 / 28%);
++  padding: 14px;
++}
++
++.settings-panel {
++  background: var(--color-surface);
++  border-radius: 12px;
++  box-shadow: 0 26px 90px rgb(20 24 24 / 24%);
++}
++
++.settings-panel > .panel-heading {
++  border-bottom: 1px solid var(--color-border);
++  margin: 0;
++  padding: 14px 18px;
++}
++
++.settings-panel > .storage-summary,
++.settings-panel > .inline-notice {
++  margin: 12px 18px 0;
++}
++
++.settings-overlay .settings-stack {
++  gap: 18px;
++  grid-template-columns: 196px minmax(0, 1fr);
++  padding: 16px 18px 18px;
++}
++
++.settings-overlay .config-tabs {
++  background: var(--color-surface-soft);
++  border-color: var(--color-border);
++  border-radius: 10px;
++  gap: 4px;
++}
++
++.settings-overlay .config-tabs button {
++  border-radius: 8px;
++  color: var(--color-muted);
++  font-size: 0.94rem;
++  font-weight: 800;
++  min-height: 40px;
++}
++
++.settings-overlay .config-tabs button:hover,
++.settings-overlay .config-tabs button.active {
++  background: var(--color-primary);
++  color: #fffdf8;
++}
++
++.config-block {
++  gap: 12px;
++}
++
++.section-title-row {
++  gap: 12px;
++}
++
++.model-row,
++.capability-row,
++.audit-row,
++.file-row,
++.mcp-tool-row,
++.variable-row {
++  background: var(--color-surface);
++  border-color: var(--color-border);
++  border-radius: 9px;
++}
++
++.model-row:hover,
++.capability-row:hover,
++.file-row:hover {
++  background: #fffcf5;
++  border-color: var(--color-border-strong);
++}
++
++.quiet-button,
++.icon-button,
++.secret-toggle-button {
++  background: var(--color-surface-soft);
++  color: var(--color-muted);
++}
++
++.quiet-button:hover,
++.icon-button:hover,
++.secret-toggle-button:hover {
++  background: #ece7de;
++  color: var(--color-text);
++}
++
++.secondary-button {
++  background: var(--color-action);
++}
++
++.secondary-button:hover {
++  background: #263f59;
++}
++
++.modal-backdrop {
++  background: rgb(25 28 28 / 34%);
++}
++
++.modal-panel {
++  border-radius: 12px;
++  box-shadow: 0 26px 90px rgb(20 24 24 / 24%);
++}
++
++.modal-panel > .panel-heading {
++  border-bottom: 1px solid var(--color-border);
++  margin-bottom: 0;
++}
++
++.modal-actions {
++  border-top-color: var(--color-border);
++}
++
++.search-panel {
++  display: flex;
++  flex: 1 1 auto;
++  flex-direction: column;
++  gap: 14px;
++  min-height: 0;
++}
++
++.search-panel > .panel-heading {
++  margin-bottom: 0;
++  order: 0;
++}
++
++.search-toolbar {
++  display: grid;
++  gap: 12px;
++  grid-template-columns: minmax(0, 1fr) 220px;
++  order: 1;
++}
++
++.search-input-wrap,
++.search-filter-wrap {
++  display: grid;
++  gap: 8px;
++  min-width: 0;
++}
++
++.search-input-wrap span,
++.search-filter-wrap span {
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  font-weight: 800;
++}
++
++.search-summary {
++  color: var(--color-muted);
++  line-height: 1.6;
++  order: 2;
++}
++
++.search-empty-state {
++  order: 3;
++}
++
++.search-panel > .empty-state:not(.search-empty-state) {
++  display: none;
++}
++
++.search-results {
++  display: grid;
++  flex: 1 1 auto;
++  gap: 12px;
++  min-height: 0;
++  order: 3;
++  overflow-y: auto;
++  padding-right: 4px;
++}
++
++.search-result-item {
++  align-items: start;
++  background: var(--color-surface);
++  border: 1px solid var(--color-border);
++  border-radius: 10px;
++  color: var(--color-text);
++  display: grid;
++  gap: 10px;
++  justify-items: stretch;
++  padding: 14px;
++  text-align: left;
++  width: 100%;
++}
++
++.search-result-item:hover,
++.search-result-item.active {
++  background: #fffcf5;
++  border-color: #cfe0d7;
++  box-shadow: 0 10px 24px rgb(31 90 79 / 8%);
++}
++
++.search-result-header,
++.search-result-meta {
++  align-items: center;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px 12px;
++  justify-content: space-between;
++}
++
++.search-result-header strong {
++  color: var(--color-text);
++  font-size: 0.98rem;
++}
++
++.search-result-header small,
++.search-result-meta span {
++  color: var(--color-muted);
++  font-size: 0.84rem;
++}
++
++.search-result-snippet {
++  color: var(--color-text);
++  margin: 0;
++  overflow-wrap: anywhere;
++}
++
++.search-highlight {
++  background: #fde7a5;
++  border-radius: 4px;
++  color: inherit;
++  padding: 0 2px;
++}
++
++.message-bubble.search-target {
++  border-color: #d5b257;
++  box-shadow: 0 0 0 3px rgb(253 231 165 / 45%);
++}
++
++@media (max-width: 760px) {
++  .app-shell {
++    padding: 12px;
++  }
++
++  .top-bar,
++  .domain-nav,
++  .section-title-row {
++    align-items: stretch;
++    gap: 16px;
++  }
++
++  .top-bar {
++    grid-template-columns: 1fr;
++  }
++
++  .domain-nav {
++    justify-self: stretch;
++  }
++
++  .domain-nav button {
++    flex: 1;
++    justify-content: center;
++  }
++
++  .status-pill {
++    justify-self: stretch;
++    max-width: none;
++  }
++
++  .dashboard-grid,
++  dl {
++    grid-template-columns: 1fr;
++  }
++
++  .composer {
++    flex-direction: column;
++  }
++
++  .file-browser,
++  .audit-row,
++  .audit-filters,
++  .search-toolbar,
++  .capability-row,
++  .model-row,
++  .model-toolbar,
++  .workbench-grid,
++  .workbench-shell.context-open .workbench-grid,
++  .config-tabs,
++  .settings-grid,
++  .model-form-layout,
++  .variable-row {
++    grid-template-columns: 1fr;
++  }
++
++  .agent-tabs,
++  .chat-header,
++  .workbench-actions,
++  .file-panel-actions {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .modal-actions {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .message-bubble {
++    max-width: 100%;
++  }
++}
++
++/* Compatibility layout for the current renderer root structure:
++   top header + nav + main content are still siblings under .app-shell. */
++.app-shell {
++  background: #f7f8fa;
++  gap: 14px 18px;
++  grid-template-columns: 248px minmax(0, 1fr);
++  grid-template-rows: auto minmax(0, 1fr);
++  height: 100vh;
++  padding: 14px 18px 18px;
++}
++
++.app-shell > .top-bar {
++  align-items: stretch;
++  background: #fff;
++  border: 1px solid #eceff3;
++  border-radius: 18px;
++  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
++  gap: 10px;
++  grid-column: 1;
++  grid-row: 1;
++  grid-template-columns: 1fr;
++  margin-bottom: 0;
++  min-height: 0;
++  padding: 18px 18px 16px;
++}
++
++.app-shell > .top-bar > div:first-child {
++  display: grid;
++  gap: 8px;
++}
++
++.app-shell > .top-bar .eyebrow {
++  color: #8b95a7;
++  font-size: 0.75rem;
++  font-weight: 700;
++  letter-spacing: 0.04em;
++  margin: 0;
++}
++
++.app-shell > .top-bar h1 {
++  color: #18202f;
++  font-size: 1.9rem;
++  font-weight: 800;
++  line-height: 1.1;
++  margin: 0;
++  white-space: normal;
++}
++
++.app-shell > .top-bar .status-pill {
++  background: transparent;
++  border: 0;
++  border-radius: 0;
++  box-shadow: none;
++  color: #7c8798;
++  font-size: 0.86rem;
++  font-weight: 500;
++  justify-content: flex-start;
++  justify-self: stretch;
++  max-width: none;
++  min-height: 0;
++  padding: 0;
++}
++
++.app-shell > .top-bar .status-pill svg {
++  display: none;
++}
++
++.app-shell > .domain-nav {
++  align-content: start;
++  align-items: stretch;
++  background: #fff;
++  border: 1px solid #eceff3;
++  border-radius: 22px;
++  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
++  display: grid;
++  gap: 4px;
++  grid-column: 1;
++  grid-row: 2;
++  justify-self: stretch;
++  min-height: 0;
++  padding: 12px 10px 14px;
++}
++
++.app-shell > .domain-nav button {
++  background: transparent;
++  border-radius: 12px;
++  color: #313b4c;
++  font-size: 0.95rem;
++  font-weight: 700;
++  justify-content: flex-start;
++  min-height: 42px;
++  padding: 0 14px;
++  width: 100%;
++}
++
++.app-shell > .domain-nav button:hover,
++.app-shell > .domain-nav button.active {
++  background: #f3f6fb;
++  color: #101828;
++}
++
++.app-shell > .dashboard-grid {
++  background: #fff;
++  border: 1px solid #eceff3;
++  border-radius: 24px;
++  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
++  grid-column: 2;
++  grid-row: 1 / span 2;
++  height: 100%;
++  min-height: 0;
++  overflow: hidden;
++  padding: 18px 20px;
++}
++
++.app-shell > .dashboard-grid > .panel {
++  background: transparent;
++  border: 0;
++  border-radius: 0;
++  box-shadow: none;
++  padding: 0;
++}
++
++.app-shell > .dashboard-grid > .panel > .panel-heading {
++  color: #101828;
++  margin-bottom: 18px;
++}
++
++.app-shell > .dashboard-grid > .panel > .panel-heading h3 {
++  color: #101828;
++  font-size: 1.1rem;
++  font-weight: 800;
++}
++
++.app-shell > .dashboard-grid > .panel > .panel-heading svg {
++  color: #667085;
++}
++
++.app-shell > .dashboard-grid .inline-notice {
++  border-radius: 14px;
++}
++
++.app-shell > .dashboard-grid .workbench-shell {
++  gap: 18px;
++  padding: 0;
++}
++
++.app-shell > .dashboard-grid .agent-tabs {
++  align-items: center;
++  border-bottom: 1px solid #eef1f5;
++  gap: 14px;
++  padding-bottom: 14px;
++}
++
++.app-shell > .dashboard-grid .agent-tab-list {
++  gap: 10px;
++}
++
++.app-shell > .dashboard-grid .agent-tab-list button {
++  background: #f7f9fc;
++  border: 1px solid transparent;
++  border-radius: 12px;
++  color: #475467;
++  font-size: 0.95rem;
++  font-weight: 700;
++  min-height: 40px;
++  padding: 0 16px;
++}
++
++.app-shell > .dashboard-grid .agent-tab-list button:hover,
++.app-shell > .dashboard-grid .agent-tab-list button.active {
++  background: #eef4ff;
++  border-color: #dbe7ff;
++  color: #1d4ed8;
++}
++
++.app-shell > .dashboard-grid .workbench-grid {
++  gap: 18px;
++  grid-template-columns: 280px minmax(0, 1fr);
++}
++
++.app-shell > .dashboard-grid .workbench-shell.context-open .workbench-grid {
++  grid-template-columns: 280px minmax(0, 1fr) 320px;
++}
++
++.app-shell > .dashboard-grid .session-sidebar,
++.app-shell > .dashboard-grid .chat-workspace,
++.app-shell > .dashboard-grid .context-panel {
++  background: #fbfcfe;
++  border: 1px solid #eef1f5;
++  border-radius: 18px;
++  padding: 16px;
++}
++
++.app-shell > .dashboard-grid .session-sidebar {
++  overflow: hidden;
++}
++
++.app-shell > .dashboard-grid .session-card-list {
++  gap: 8px;
++  max-height: 100%;
++  overflow-y: auto;
++  padding-right: 2px;
++}
++
++.app-shell > .dashboard-grid .session-card {
++  background: #fff;
++  border: 1px solid #edf1f6;
++  border-radius: 14px;
++  gap: 6px;
++  padding: 12px 14px;
++}
++
++.app-shell > .dashboard-grid .session-card:hover,
++.app-shell > .dashboard-grid .session-card.active {
++  background: #f8fbff;
++  border-color: #dbe7ff;
++  box-shadow: 0 1px 2px rgb(29 78 216 / 0.08);
++}
++
++.app-shell > .dashboard-grid .session-card strong,
++.app-shell > .dashboard-grid .session-card input {
++  color: #172033;
++  font-size: 0.95rem;
++  font-weight: 700;
++}
++
++.app-shell > .dashboard-grid .session-card small {
++  color: #667085;
++  font-size: 0.82rem;
++}
++
++.app-shell > .dashboard-grid .chat-header {
++  border-bottom-color: #eef1f5;
++  padding-bottom: 12px;
++}
++
++.app-shell > .dashboard-grid .chat-header strong {
++  color: #101828;
++  font-size: 1.05rem;
++}
++
++.app-shell > .dashboard-grid .chat-header span {
++  color: #667085;
++}
++
++.app-shell > .dashboard-grid .conversation-list {
++  background: #fff;
++  border: 1px solid #f1f3f7;
++  border-radius: 16px;
++  padding: 16px;
++}
++
++.app-shell > .dashboard-grid .message-bubble.user {
++  background: #eef4ff;
++  color: #1e3a5f;
++}
++
++.app-shell > .dashboard-grid .message-bubble.assistant {
++  background: #fff;
++  border: 1px solid #eef1f5;
++  box-shadow: none;
++}
++
++.app-shell > .dashboard-grid .workbench-composer {
++  background: #fff;
++  border: 1px solid #eef1f5;
++  border-radius: 18px;
++  box-shadow: none;
++  max-width: none;
++}
++
++.app-shell > .dashboard-grid .composer-tool-button,
++.app-shell > .dashboard-grid .quiet-button,
++.app-shell > .dashboard-grid .icon-button {
++  background: #f5f7fa;
++  color: #475467;
++}
++
++.app-shell > .dashboard-grid .composer-tool-button:hover:not(:disabled),
++.app-shell > .dashboard-grid .quiet-button:hover,
++.app-shell > .dashboard-grid .icon-button:hover {
++  background: #edf2f7;
++  color: #101828;
++}
++
++.app-shell > .dashboard-grid .secondary-button {
++  background: #111827;
++}
++
++.app-shell > .dashboard-grid .secondary-button:hover {
++  background: #0f172a;
++}
++
++.app-shell > .dashboard-grid .search-toolbar {
++  gap: 14px;
++}
++
++.app-shell > .dashboard-grid .search-result-item {
++  background: #fff;
++  border-color: #eef1f5;
++  border-radius: 16px;
++  box-shadow: none;
++}
++
++.app-shell > .dashboard-grid .search-result-item:hover,
++.app-shell > .dashboard-grid .search-result-item.active {
++  background: #f8fbff;
++  border-color: #dbe7ff;
++}
++
++.app-shell > .dashboard-grid .audit-filters {
++  align-items: end;
++  background: #fbfcfe;
++  border: 1px solid #eef1f5;
++  border-radius: 18px;
++  margin: 0 0 18px;
++  padding: 16px;
++}
++
++.app-shell > .dashboard-grid .audit-list {
++  gap: 0;
++  max-height: none;
++  overflow: hidden auto;
++}
++
++.app-shell > .dashboard-grid .audit-row {
++  align-items: center;
++  background: transparent;
++  border: 0;
++  border-bottom: 1px solid #f0f2f5;
++  border-radius: 0;
++  box-shadow: none;
++  grid-template-columns: minmax(180px, 0.9fr) minmax(180px, 0.8fr) minmax(0, 1.5fr) auto;
++  min-height: 72px;
++  padding: 14px 6px;
++}
++
++.app-shell > .dashboard-grid .audit-row:last-child {
++  border-bottom: 0;
++}
++
++.app-shell > .dashboard-grid .audit-row strong {
++  color: #101828;
++  font-size: 0.96rem;
++}
++
++.app-shell > .dashboard-grid .audit-row span,
++.app-shell > .dashboard-grid .audit-row p {
++  color: #667085;
++}
++
++.app-shell > .dashboard-grid .audit-pagination {
++  border-top: 1px solid #eef1f5;
++  margin-top: 8px;
++  padding-top: 16px;
++}
++
++@media (max-width: 1100px) {
++  .app-shell {
++    grid-template-columns: 224px minmax(0, 1fr);
++  }
++
++  .app-shell > .dashboard-grid .workbench-grid {
++    grid-template-columns: 240px minmax(0, 1fr);
++  }
++
++  .app-shell > .dashboard-grid .workbench-shell.context-open .workbench-grid {
++    grid-template-columns: 240px minmax(0, 1fr);
++  }
++}
++
++@media (max-width: 760px) {
++  .app-shell {
++    gap: 12px;
++    grid-template-columns: 1fr;
++    grid-template-rows: auto auto minmax(0, 1fr);
++    height: auto;
++    min-height: 100vh;
++  }
++
++  .app-shell > .top-bar,
++  .app-shell > .domain-nav,
++  .app-shell > .dashboard-grid {
++    grid-column: 1;
++  }
++
++  .app-shell > .top-bar {
++    grid-row: 1;
++  }
++
++  .app-shell > .domain-nav {
++    grid-row: 2;
++  }
++
++  .app-shell > .dashboard-grid {
++    grid-row: 3;
++  }
++
++  .app-shell > .dashboard-grid {
++    border-radius: 18px;
++    padding: 14px;
++  }
++
++  .app-shell > .dashboard-grid .workbench-grid,
++  .app-shell > .dashboard-grid .workbench-shell.context-open .workbench-grid {
++    grid-template-columns: 1fr;
++  }
++
++  .app-shell > .dashboard-grid .audit-row {
++    grid-template-columns: 1fr;
+   }
+ }
+diff --git a/packages/windows-client/src/shared/ipc.ts b/packages/windows-client/src/shared/ipc.ts
+index 315ab278..43f1774d 100644
+--- a/packages/windows-client/src/shared/ipc.ts
++++ b/packages/windows-client/src/shared/ipc.ts
+@@ -2,11 +2,13 @@ export const IPC_CHANNELS = {
+ 	getEnvironment: "app:get-environment",
+ 	configGet: "config:get",
+ 	configSaveAgentCore: "config:save-agent-core",
++	configSaveVariables: "config:save-variables",
+ 	configSaveModel: "config:save-model",
+ 	configDeleteModel: "config:delete-model",
+ 	configTestModel: "config:test-model",
+ 	configSaveCapability: "config:save-capability",
+ 	configDeleteCapability: "config:delete-capability",
++	configDiscoverMcpTools: "config:discover-mcp-tools",
+ 	configSaveAgent: "config:save-agent",
+ 	configDeleteAgent: "config:delete-agent",
+ 	configReset: "config:reset",
+diff --git a/packages/windows-client/src/shared/types.ts b/packages/windows-client/src/shared/types.ts
+index 5b0a5655..dfadf265 100644
+--- a/packages/windows-client/src/shared/types.ts
++++ b/packages/windows-client/src/shared/types.ts
+@@ -73,6 +73,13 @@ export interface ModelConnectionTestResult {
+ 	testedAt: string;
+ }
+ 
++export interface McpToolDiscoveryResult {
++	status: CapabilityConnectionStatus;
++	message: string;
++	tools: McpToolConfig[];
++	testedAt: string;
++}
++
+ export interface AuditLogQuery {
+ 	startTime?: string;
+ 	endTime?: string;
+@@ -136,6 +143,12 @@ export interface AgentCoreConfig {
+ 	rpcEndpoint: string;
+ }
+ 
++export interface ClientVariableConfig {
++	name: string;
++	value: string;
++	description: string;
++}
++
+ export interface ModelProfileConfig {
+ 	id: string;
+ 	displayName: string;
+@@ -177,25 +190,70 @@ export type CapabilityType = "tool" | "skill" | "mcp" | "browser" | "http" | "co
+ export type CapabilityExecutionMode = "http" | "command" | "builtin" | "mcp" | "manual";
+ export type CapabilityTriggerMode = "agent" | "manual" | "workflow" | "agent-and-workflow";
+ export type CapabilityConnectionStatus = "unknown" | "untested" | "success" | "failure";
++export type CapabilityHttpBodyType = "json" | "binary" | "form-data" | "text" | "url-text";
++export type CapabilityHttpAuthType = "none" | "bearer" | "api-key" | "custom-headers";
++export type CapabilityResultFormat = "text" | "json" | "markdown" | "file";
++export type CapabilityCostPolicy = "free" | "paid" | "paid-fallback";
++export type McpTransportMode = "stream-http" | "sse";
++export type McpAuthType = "none" | "bearer";
++export type BrowserCapabilityMode = "builtin" | "chrome" | "mcp";
++
++export interface McpToolConfig {
++	name: string;
++	description: string;
++	inputSchemaJson: string;
++	enabled: boolean;
++}
+ 
+ export interface CapabilityConfig {
+ 	id: string;
++	createdAt: string;
++	updatedAt: string;
+ 	name: string;
+ 	type: CapabilityType;
++	toolName: string;
+ 	category: string;
+ 	description: string;
++	useWhen: string;
++	avoidWhen: string;
+ 	content: string;
+ 	advancedConfig: string;
+ 	triggerMode: CapabilityTriggerMode;
+ 	executionMode: CapabilityExecutionMode;
+ 	endpoint: string;
+ 	httpMethod: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
++	httpBodyType: CapabilityHttpBodyType;
++	httpContentType: string;
++	httpQueryParamsJson: string;
++	httpAuthType: CapabilityHttpAuthType;
++	httpAuthHeaderName: string;
++	httpAuthTokenEnv: string;
++	httpAuthTokenValue: string;
+ 	command: string;
++	mcpServerName: string;
++	mcpUrl: string;
++	mcpTransport: McpTransportMode;
++	mcpAuthType: McpAuthType;
++	mcpApiKeyValue: string;
++	mcpHeadersJson: string;
++	mcpTools: McpToolConfig[];
++	browserMode?: BrowserCapabilityMode;
++	browserAllowedDomains?: string[];
++	browserBlockedDomains?: string[];
++	browserAllowScreenshots?: boolean;
++	browserAllowDownloads?: boolean;
++	browserRequireConfirmation?: boolean;
++	browserMaxSteps?: number;
++	browserTimeoutMs?: number;
+ 	workingDirectory: string;
+ 	tokenEnv: string;
+ 	headersJson: string;
+ 	inputSchemaJson: string;
+ 	outputSchemaJson: string;
++	resultFormat: CapabilityResultFormat;
++	resultMapping: string;
++	costPolicy: CapabilityCostPolicy;
++	requiresConfirmation: boolean;
+ 	timeoutMs: number;
+ 	retryCount: number;
+ 	enabled: boolean;
+@@ -245,6 +303,7 @@ export interface AgentConfig {
+ 
+ export interface ClientConfig {
+ 	agentCore: AgentCoreConfig;
++	variables: ClientVariableConfig[];
+ 	model: ModelConfig;
+ 	capabilities: CapabilityConfig[];
+ 	agents: AgentConfig[];
+@@ -261,11 +320,13 @@ export interface WindowsClientApi {
+ 	getEnvironment: () => Promise<AppEnvironment>;
+ 	getClientConfig: () => Promise<ClientConfigState>;
+ 	saveAgentCoreConfig: (agentCore: AgentCoreConfig) => Promise<ClientConfigState>;
++	saveVariablesConfig: (variables: ClientVariableConfig[]) => Promise<ClientConfigState>;
+ 	saveModelConfig: (model: ModelConfig) => Promise<ClientConfigState>;
+ 	deleteModelConfig: (id: string) => Promise<ClientConfigState>;
+ 	testModelConfig: (model: ModelProfileConfig) => Promise<ModelConnectionTestResult>;
+ 	saveCapabilityConfig: (capability: CapabilityConfig) => Promise<ClientConfigState>;
+ 	deleteCapabilityConfig: (id: string) => Promise<ClientConfigState>;
++	discoverMcpTools: (capability: CapabilityConfig) => Promise<McpToolDiscoveryResult>;
+ 	saveAgentConfig: (agent: AgentConfig) => Promise<ClientConfigState>;
+ 	deleteAgentConfig: (id: string) => Promise<ClientConfigState>;
+ 	resetClientConfig: () => Promise<ClientConfigState>;

@@ -597,7 +597,7 @@ function App(): ReactElement {
   const [agentNotice, setAgentNotice] = useState<LocalNotice | null>(null);
   const [configNotice, setConfigNotice] = useState<LocalNotice | null>(null);
   const [modelEditorNotice, setModelEditorNotice] = useState<LocalNotice | null>(null);
-  const [activeSection, setActiveSection] = useState<'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs' | 'billing'>(
+  const [activeSection, setActiveSection] = useState<'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs'>(
     'workbench',
   );
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
@@ -1402,44 +1402,6 @@ function App(): ReactElement {
     setCapabilityEditor((capability) => (capability ? { ...capability, [key]: value } : capability));
   }
 
-  function applyCapabilityType(type: CapabilityConfig['type']): void {
-    const defaultExecutionModeByType: Record<CapabilityConfig['type'], CapabilityExecutionMode> = {
-      tool: 'builtin',
-      skill: 'manual',
-      mcp: 'mcp',
-      browser: 'builtin',
-      http: 'http',
-      command: 'command',
-      other: 'manual',
-    };
-    setCapabilityEditor((capability) =>
-      capability
-        ? {
-            ...capability,
-            type,
-            executionMode: defaultExecutionModeByType[type],
-          }
-        : capability,
-    );
-  }
-
-  async function discoverMcpTools(capability: CapabilityConfig): Promise<void> {
-    setStatusText(`正在发现 MCP 工具：${capability.name || capability.mcpServerName || capability.mcpUrl}`);
-    const result = await window.windowsClient.discoverMcpTools(capability);
-    setCapabilityEditor((current) =>
-      current && current.id === capability.id
-        ? {
-            ...current,
-            mcpTools: result.tools,
-            connectionStatus: result.status,
-            lastTestedAt: new Date().toISOString(),
-          }
-        : current,
-    );
-    setConfigNotice({ tone: result.status === 'success' ? 'success' : 'error', text: result.message });
-    setStatusText(result.message);
-  }
-
   function updateAgentEditor<K extends keyof AgentConfig>(key: K, value: AgentConfig[K]): void {
     setAgentEditor((agent) => (agent ? { ...agent, [key]: value } : agent));
   }
@@ -1809,71 +1771,6 @@ function App(): ReactElement {
 
   return (
     <main className="app-shell">
-      <aside className="global-sidebar" aria-label="司南导航">
-        <div className="sidebar-brand">
-          <span className="brand-mark">司</span>
-          <strong>司南</strong>
-        </div>
-
-        <div className="sidebar-actions">
-          <button type="button" onClick={createNewConversation} disabled={!selectedAgent}>
-            <Plus size={16} />
-            <span>新对话</span>
-          </button>
-          <button
-            type="button"
-            className={activeSection === 'search' ? 'active' : ''}
-            onClick={() => setActiveSection('search')}
-          >
-            <Search size={16} />
-            <span>搜索</span>
-          </button>
-          <button
-            type="button"
-            className={activeSection === 'logs' ? 'active' : ''}
-            onClick={() => setActiveSection('logs')}
-          >
-            <ListChecks size={16} />
-            <span>运行日志</span>
-          </button>
-          <button
-            type="button"
-            className={activeSection === 'billing' ? 'active' : ''}
-            onClick={() => setActiveSection('billing')}
-          >
-            <FileText size={16} />
-            <span>消费明细</span>
-          </button>
-        </div>
-
-        <div className="sidebar-section-title">历史会话</div>
-        <div className="sidebar-conversations">
-          {selectedAgentConversations.length === 0 ? (
-            <p className="sidebar-empty">当前智能体暂无历史会话</p>
-          ) : (
-            selectedAgentConversations.map((conversation) => (
-              <button
-                type="button"
-                className={`sidebar-thread ${conversation.id === selectedConversation.id ? 'active' : ''}`}
-                key={conversation.id}
-                onClick={() => {
-                  selectConversation(conversation.id);
-                  setActiveSection('workbench');
-                }}
-              >
-                <span>{conversation.title || '新会话'}</span>
-                <small>{formatLocalTimestamp(conversation.updatedAt)}</small>
-              </button>
-            ))
-          )}
-        </div>
-
-        <button type="button" className="sidebar-settings" onClick={() => setActiveSection('config')}>
-          <Settings size={16} />
-          <span>设置</span>
-        </button>
-      </aside>
-
       <header className="top-bar">
         <div>
           <p className="eyebrow">Windows 客户端</p>
@@ -1980,16 +1877,6 @@ function App(): ReactElement {
                 ))}
               </div>
             )}
-          </article>
-        )}
-
-        {activeSection === 'billing' && (
-          <article className="panel wide-panel">
-            <div className="panel-heading">
-              <FileText size={20} />
-              <h3>消费明细</h3>
-            </div>
-            <p className="empty-state">消费明细暂未接入，后续会汇总会话 token、模型价格和工具调用用量。</p>
           </article>
         )}
 
@@ -3616,7 +3503,9 @@ function App(): ReactElement {
                 <span>{requiredLabel('能力类型')}</span>
                 <select
                   value={capabilityEditor.type}
-                  onChange={(event) => applyCapabilityType(event.target.value as CapabilityConfig['type'])}
+                  onChange={(event) =>
+                    updateCapabilityEditor('type', event.target.value as CapabilityConfig['type'])
+                  }
                 >
                   {Object.entries(capabilityTypeLabels).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
@@ -3649,240 +3538,6 @@ function App(): ReactElement {
 第一期不会自动解析，只会原样保存并作为智能体理解能力的上下文。`}
                 />
               </label>
-
-              <div className="form-section-heading wide-field">
-                <strong>类型专属配置</strong>
-                <span>不同能力类型只展示对应字段，避免新增 Tools / Skills 时表单完全一样。</span>
-              </div>
-
-              {capabilityEditor.type === 'tool' && (
-                <div className="tool-config-panel wide-field">
-                  <label>
-                    <span>工具名</span>
-                    <input
-                      value={capabilityEditor.toolName}
-                      onChange={(event) => updateCapabilityEditor('toolName', event.target.value)}
-                      placeholder="enterprise_lookup"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>适用场景</span>
-                    <textarea
-                      value={capabilityEditor.useWhen}
-                      onChange={(event) => updateCapabilityEditor('useWhen', event.target.value)}
-                      rows={3}
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>不适用场景</span>
-                    <textarea
-                      value={capabilityEditor.avoidWhen}
-                      onChange={(event) => updateCapabilityEditor('avoidWhen', event.target.value)}
-                      rows={3}
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'skill' && (
-                <div className="tool-config-panel wide-field">
-                  <label className="wide-field">
-                    <span>Skill 使用说明</span>
-                    <textarea
-                      value={capabilityEditor.useWhen}
-                      onChange={(event) => updateCapabilityEditor('useWhen', event.target.value)}
-                      rows={4}
-                      placeholder="写清楚智能体什么时候应该调用这个 Skill。"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>边界和限制</span>
-                    <textarea
-                      value={capabilityEditor.avoidWhen}
-                      onChange={(event) => updateCapabilityEditor('avoidWhen', event.target.value)}
-                      rows={3}
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'http' && (
-                <div className="tool-config-panel wide-field">
-                  <label className="wide-field">
-                    <span>接口地址</span>
-                    <input
-                      value={capabilityEditor.endpoint}
-                      onChange={(event) => updateCapabilityEditor('endpoint', event.target.value)}
-                      placeholder="https://api.example.com/v1/resource"
-                    />
-                  </label>
-                  <label>
-                    <span>请求方法</span>
-                    <select
-                      value={capabilityEditor.httpMethod}
-                      onChange={(event) =>
-                        updateCapabilityEditor('httpMethod', event.target.value as CapabilityConfig['httpMethod'])
-                      }
-                    >
-                      {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((method) => (
-                        <option key={method} value={method}>{method}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Body 类型</span>
-                    <select
-                      value={capabilityEditor.httpBodyType}
-                      onChange={(event) =>
-                        updateCapabilityEditor('httpBodyType', event.target.value as CapabilityConfig['httpBodyType'])
-                      }
-                    >
-                      <option value="json">JSON</option>
-                      <option value="form-data">Form Data</option>
-                      <option value="text">Text</option>
-                      <option value="binary">Binary</option>
-                      <option value="url-text">URL Text</option>
-                    </select>
-                  </label>
-                  <label className="wide-field">
-                    <span>Header JSON</span>
-                    <textarea
-                      value={capabilityEditor.headersJson}
-                      onChange={(event) => updateCapabilityEditor('headersJson', event.target.value)}
-                      rows={4}
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'mcp' && (
-                <div className="mcp-config-panel wide-field">
-                  <label>
-                    <span>MCP 服务名</span>
-                    <input
-                      value={capabilityEditor.mcpServerName}
-                      onChange={(event) => updateCapabilityEditor('mcpServerName', event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>传输协议</span>
-                    <select
-                      value={capabilityEditor.mcpTransport}
-                      onChange={(event) =>
-                        updateCapabilityEditor('mcpTransport', event.target.value as CapabilityConfig['mcpTransport'])
-                      }
-                    >
-                      <option value="stream-http">Stream HTTP</option>
-                      <option value="sse">SSE</option>
-                    </select>
-                  </label>
-                  <label className="wide-field">
-                    <span>MCP URL</span>
-                    <input
-                      value={capabilityEditor.mcpUrl}
-                      onChange={(event) => updateCapabilityEditor('mcpUrl', event.target.value)}
-                      placeholder="http://127.0.0.1:3000/mcp"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>MCP Headers JSON</span>
-                    <textarea
-                      value={capabilityEditor.mcpHeadersJson}
-                      onChange={(event) => updateCapabilityEditor('mcpHeadersJson', event.target.value)}
-                      rows={4}
-                    />
-                  </label>
-                  <div className="wide-field">
-                    <button type="button" className="secondary-button" onClick={() => discoverMcpTools(capabilityEditor)}>
-                      发现 MCP 工具
-                    </button>
-                  </div>
-                  <div className="mcp-tool-list wide-field">
-                    {capabilityEditor.mcpTools.length === 0 ? (
-                      <p className="empty-state">还没有发现工具。</p>
-                    ) : (
-                      capabilityEditor.mcpTools.map((tool, index) => (
-                        <label className="mcp-tool-row" key={`${tool.name}-${index}`}>
-                          <span className="checkbox-row compact-checkbox">
-                            <input
-                              type="checkbox"
-                              checked={tool.enabled}
-                              onChange={(event) => {
-                                const nextTools = capabilityEditor.mcpTools.map((item, itemIndex) =>
-                                  itemIndex === index ? { ...item, enabled: event.target.checked } : item,
-                                );
-                                updateCapabilityEditor('mcpTools', nextTools);
-                              }}
-                            />
-                            启用
-                          </span>
-                          <strong>{tool.name}</strong>
-                          <span>{tool.description || '暂无说明'}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'browser' && (
-                <div className="browser-config-panel wide-field">
-                  <label>
-                    <span>浏览器模式</span>
-                    <select
-                      value={capabilityEditor.browserMode ?? 'builtin'}
-                      onChange={(event) =>
-                        updateCapabilityEditor('browserMode', event.target.value as CapabilityConfig['browserMode'])
-                      }
-                    >
-                      <option value="builtin">内置受控浏览器</option>
-                      <option value="chrome">本机 Chrome</option>
-                      <option value="mcp">MCP 浏览器</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>最大步骤数</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={capabilityEditor.browserMaxSteps ?? 8}
-                      onChange={(event) => updateCapabilityEditor('browserMaxSteps', Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>允许域名</span>
-                    <input
-                      value={(capabilityEditor.browserAllowedDomains ?? []).join(', ')}
-                      onChange={(event) =>
-                        updateCapabilityEditor(
-                          'browserAllowedDomains',
-                          event.target.value.split(',').map((domain) => domain.trim()).filter(Boolean),
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {capabilityEditor.type === 'command' && (
-                <div className="tool-config-panel wide-field">
-                  <label className="wide-field">
-                    <span>命令</span>
-                    <input
-                      value={capabilityEditor.command}
-                      onChange={(event) => updateCapabilityEditor('command', event.target.value)}
-                      placeholder="node scripts/example.js"
-                    />
-                  </label>
-                  <label className="wide-field">
-                    <span>工作目录</span>
-                    <input
-                      value={capabilityEditor.workingDirectory}
-                      onChange={(event) => updateCapabilityEditor('workingDirectory', event.target.value)}
-                    />
-                  </label>
-                </div>
-              )}
 
               <div className="form-section-heading wide-field">
                 <strong>管理信息</strong>

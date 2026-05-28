@@ -1,5 +1,4 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
 import type {
@@ -8,14 +7,12 @@ import type {
 	AppEnvironment,
 	AuditLogQuery,
 	CapabilityConfig,
-	ClientVariableConfig,
 	ModelConfig,
 	ModelProfileConfig,
 } from "../shared/types";
 import { RpcAgentAdapter } from "./agent/agentAdapter";
 import { AgentService } from "./services/agentService";
 import { AuditLogger } from "./services/auditLogger";
-import { BrowserToolService } from "./services/browserToolService";
 import { ConfigService } from "./services/configService";
 import { WorkspaceFileService } from "./services/workspaceFileService";
 import { WorkspaceService } from "./services/workspaceService";
@@ -24,10 +21,8 @@ const auditLogger = new AuditLogger();
 const configService = new ConfigService(auditLogger);
 const workspaceService = new WorkspaceService(auditLogger);
 const workspaceFileService = new WorkspaceFileService(workspaceService, auditLogger);
-const browserToolService = new BrowserToolService(auditLogger);
-const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
+const agentAdapter = new RpcAgentAdapter();
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
-const mainDir = dirname(fileURLToPath(import.meta.url));
 
 function createWindow(): void {
 	const window = new BrowserWindow({
@@ -38,7 +33,7 @@ function createWindow(): void {
 		title: "Pi 智能体客户端",
 		backgroundColor: "#f6f5f2",
 		webPreferences: {
-			preload: join(mainDir, "../preload/index.mjs"),
+			preload: join(__dirname, "../preload/index.mjs"),
 			sandbox: false,
 			contextIsolation: true,
 			nodeIntegration: false,
@@ -59,7 +54,7 @@ function createWindow(): void {
 	if (process.env.NODE_ENV === "development" || process.env.ELECTRON_RENDERER_URL) {
 		void window.loadURL(rendererUrl);
 	} else {
-		void window.loadFile(join(mainDir, "../renderer/index.html"));
+		void window.loadFile(join(__dirname, "../renderer/index.html"));
 	}
 }
 
@@ -78,9 +73,6 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.configSaveAgentCore, (_event, agentCore: AgentCoreConfig) =>
 		configService.saveAgentCoreConfig(agentCore),
 	);
-	ipcMain.handle(IPC_CHANNELS.configSaveVariables, (_event, variables: ClientVariableConfig[]) =>
-		configService.saveVariablesConfig(variables),
-	);
 	ipcMain.handle(IPC_CHANNELS.configSaveModel, (_event, model: ModelConfig) => configService.saveModelConfig(model));
 	ipcMain.handle(IPC_CHANNELS.configDeleteModel, (_event, id: string) => configService.deleteModelConfig(id));
 	ipcMain.handle(IPC_CHANNELS.configTestModel, (_event, model: ModelProfileConfig) =>
@@ -91,9 +83,6 @@ function registerIpcHandlers(): void {
 	);
 	ipcMain.handle(IPC_CHANNELS.configDeleteCapability, (_event, id: string) =>
 		configService.deleteCapabilityConfig(id),
-	);
-	ipcMain.handle(IPC_CHANNELS.configDiscoverMcpTools, (_event, capability: CapabilityConfig) =>
-		agentService.discoverMcpTools(capability),
 	);
 	ipcMain.handle(IPC_CHANNELS.configSaveAgent, (_event, agent: AgentConfig) => configService.saveAgentConfig(agent));
 	ipcMain.handle(IPC_CHANNELS.configDeleteAgent, (_event, id: string) => configService.deleteAgentConfig(id));

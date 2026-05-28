@@ -73,13 +73,6 @@ export interface ModelConnectionTestResult {
 	testedAt: string;
 }
 
-export interface McpToolDiscoveryResult {
-	status: CapabilityConnectionStatus;
-	message: string;
-	tools: McpToolConfig[];
-	testedAt: string;
-}
-
 export interface AuditLogQuery {
 	startTime?: string;
 	endTime?: string;
@@ -143,12 +136,6 @@ export interface AgentCoreConfig {
 	rpcEndpoint: string;
 }
 
-export interface ClientVariableConfig {
-	name: string;
-	value: string;
-	description: string;
-}
-
 export interface ModelProfileConfig {
 	id: string;
 	displayName: string;
@@ -190,70 +177,25 @@ export type CapabilityType = "tool" | "skill" | "mcp" | "browser" | "http" | "co
 export type CapabilityExecutionMode = "http" | "command" | "builtin" | "mcp" | "manual";
 export type CapabilityTriggerMode = "agent" | "manual" | "workflow" | "agent-and-workflow";
 export type CapabilityConnectionStatus = "unknown" | "untested" | "success" | "failure";
-export type CapabilityHttpBodyType = "json" | "binary" | "form-data" | "text" | "url-text";
-export type CapabilityHttpAuthType = "none" | "bearer" | "api-key" | "custom-headers";
-export type CapabilityResultFormat = "text" | "json" | "markdown" | "file";
-export type CapabilityCostPolicy = "free" | "paid" | "paid-fallback";
-export type McpTransportMode = "stream-http" | "sse";
-export type McpAuthType = "none" | "bearer";
-export type BrowserCapabilityMode = "builtin" | "chrome" | "mcp";
-
-export interface McpToolConfig {
-	name: string;
-	description: string;
-	inputSchemaJson: string;
-	enabled: boolean;
-}
 
 export interface CapabilityConfig {
 	id: string;
-	createdAt: string;
-	updatedAt: string;
 	name: string;
 	type: CapabilityType;
-	toolName: string;
 	category: string;
 	description: string;
-	useWhen: string;
-	avoidWhen: string;
 	content: string;
 	advancedConfig: string;
 	triggerMode: CapabilityTriggerMode;
 	executionMode: CapabilityExecutionMode;
 	endpoint: string;
 	httpMethod: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-	httpBodyType: CapabilityHttpBodyType;
-	httpContentType: string;
-	httpQueryParamsJson: string;
-	httpAuthType: CapabilityHttpAuthType;
-	httpAuthHeaderName: string;
-	httpAuthTokenEnv: string;
-	httpAuthTokenValue: string;
 	command: string;
-	mcpServerName: string;
-	mcpUrl: string;
-	mcpTransport: McpTransportMode;
-	mcpAuthType: McpAuthType;
-	mcpApiKeyValue: string;
-	mcpHeadersJson: string;
-	mcpTools: McpToolConfig[];
-	browserMode?: BrowserCapabilityMode;
-	browserAllowedDomains?: string[];
-	browserBlockedDomains?: string[];
-	browserAllowScreenshots?: boolean;
-	browserAllowDownloads?: boolean;
-	browserRequireConfirmation?: boolean;
-	browserMaxSteps?: number;
-	browserTimeoutMs?: number;
 	workingDirectory: string;
 	tokenEnv: string;
 	headersJson: string;
 	inputSchemaJson: string;
 	outputSchemaJson: string;
-	resultFormat: CapabilityResultFormat;
-	resultMapping: string;
-	costPolicy: CapabilityCostPolicy;
-	requiresConfirmation: boolean;
 	timeoutMs: number;
 	retryCount: number;
 	enabled: boolean;
@@ -303,7 +245,6 @@ export interface AgentConfig {
 
 export interface ClientConfig {
 	agentCore: AgentCoreConfig;
-	variables: ClientVariableConfig[];
 	model: ModelConfig;
 	capabilities: CapabilityConfig[];
 	agents: AgentConfig[];
@@ -320,13 +261,11 @@ export interface WindowsClientApi {
 	getEnvironment: () => Promise<AppEnvironment>;
 	getClientConfig: () => Promise<ClientConfigState>;
 	saveAgentCoreConfig: (agentCore: AgentCoreConfig) => Promise<ClientConfigState>;
-	saveVariablesConfig: (variables: ClientVariableConfig[]) => Promise<ClientConfigState>;
 	saveModelConfig: (model: ModelConfig) => Promise<ClientConfigState>;
 	deleteModelConfig: (id: string) => Promise<ClientConfigState>;
 	testModelConfig: (model: ModelProfileConfig) => Promise<ModelConnectionTestResult>;
 	saveCapabilityConfig: (capability: CapabilityConfig) => Promise<ClientConfigState>;
 	deleteCapabilityConfig: (id: string) => Promise<ClientConfigState>;
-	discoverMcpTools: (capability: CapabilityConfig) => Promise<McpToolDiscoveryResult>;
 	saveAgentConfig: (agent: AgentConfig) => Promise<ClientConfigState>;
 	deleteAgentConfig: (id: string) => Promise<ClientConfigState>;
 	resetClientConfig: () => Promise<ClientConfigState>;
