@@ -589,14 +589,6 @@ function isDefaultConversationTitle(title: string, agent: AgentConfig): boolean 
   return title === `${agent.name} 会话` || title === '新的会话' || title.trim() === '';
 }
 
-function getConversationDisplayTitle(conversation: AgentConversationState, agent: AgentConfig | null): string {
-  if (!agent || !isDefaultConversationTitle(conversation.title, agent)) {
-    return conversation.title || '新对话';
-  }
-  const firstUserMessage = conversation.transcript.find((item) => item.role === 'user')?.text;
-  return firstUserMessage ? createConversationTitleFromMessage(firstUserMessage) : '新对话';
-}
-
 function App(): ReactElement {
   const [environment, setEnvironment] = useState<AppEnvironment | null>(null);
   const [configState, setConfigState] = useState<ClientConfigState | null>(null);
@@ -1887,7 +1879,7 @@ function App(): ReactElement {
                   setActiveSection('workbench');
                 }}
               >
-                <span>{getConversationDisplayTitle(conversation, selectedAgent)}</span>
+                <span>{conversation.title || '新会话'}</span>
                 <small>{formatLocalTimestamp(conversation.updatedAt)}</small>
               </button>
             ))

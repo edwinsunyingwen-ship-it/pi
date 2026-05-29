@@ -3361,7 +3361,6 @@ select:focus {
 }
 
 .app-shell > .dashboard-grid .workbench-shell {
-  grid-template-rows: auto minmax(0, 1fr);
   height: calc(100vh - 36px);
 }
 

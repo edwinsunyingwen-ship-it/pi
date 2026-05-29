@@ -577,26 +577,6 @@ function createAgentConversation(agent: AgentConfig | null | undefined): AgentCo
   };
 }
 
-function createConversationTitleFromMessage(message: string): string {
-  const compactMessage = message.replace(/\s+/g, ' ').trim();
-  if (!compactMessage) {
-    return '新的会话';
-  }
-  return compactMessage.length > 24 ? `${compactMessage.slice(0, 24)}...` : compactMessage;
-}
-
-function isDefaultConversationTitle(title: string, agent: AgentConfig): boolean {
-  return title === `${agent.name} 会话` || title === '新的会话' || title.trim() === '';
-}
-
-function getConversationDisplayTitle(conversation: AgentConversationState, agent: AgentConfig | null): string {
-  if (!agent || !isDefaultConversationTitle(conversation.title, agent)) {
-    return conversation.title || '新对话';
-  }
-  const firstUserMessage = conversation.transcript.find((item) => item.role === 'user')?.text;
-  return firstUserMessage ? createConversationTitleFromMessage(firstUserMessage) : '新对话';
-}
-
 function App(): ReactElement {
   const [environment, setEnvironment] = useState<AppEnvironment | null>(null);
   const [configState, setConfigState] = useState<ClientConfigState | null>(null);
@@ -1715,14 +1695,9 @@ function App(): ReactElement {
 
     const userItem: TranscriptItem = { role: 'user', text: message, createdAt: new Date().toISOString() };
     const userTranscript = [...transcript, userItem];
-    const nextTitle =
-      transcript.length === 0 && isDefaultConversationTitle(messageConversation.title, messageAgent)
-        ? createConversationTitleFromMessage(message)
-        : messageConversation.title;
     commitAgentConversation(messageAgent.id, {
       ...messageConversation,
       draftMessage: '',
-      title: nextTitle,
       transcript: userTranscript,
     });
     setStatusText('正在通过适配器发送消息');
@@ -1744,7 +1719,6 @@ function App(): ReactElement {
     commitAgentConversation(messageAgent.id, {
       ...messageConversation,
       session: nextSession,
-      title: nextTitle,
       transcript: assistantTranscript,
       draftMessage: '',
     });
@@ -1887,7 +1861,7 @@ function App(): ReactElement {
                   setActiveSection('workbench');
                 }}
               >
-                <span>{getConversationDisplayTitle(conversation, selectedAgent)}</span>
+                <span>{conversation.title || '新会话'}</span>
                 <small>{formatLocalTimestamp(conversation.updatedAt)}</small>
               </button>
             ))
@@ -2038,34 +2012,20 @@ function App(): ReactElement {
                   ))
                 )}
               </div>
-              <div className="agent-tab-actions">
-                <button
-                  type="button"
-                  className="quiet-button compact-button icon-only-button"
-                  onClick={() => {
-                    setAgentEditor(createAgentConfig());
+              <button
+                type="button"
+                className="quiet-button compact-button"
+                onClick={() => {
+                  if (selectedAgent) {
+                    setAgentEditor(selectedAgent);
                     setActiveConfigTab('agents');
-                  }}
-                  aria-label="新增智能体"
-                  title="新增智能体"
-                >
-                  <Plus size={18} />
-                </button>
-                <button
-                  type="button"
-                  className="quiet-button compact-button"
-                  onClick={() => {
-                    if (selectedAgent) {
-                      setAgentEditor(selectedAgent);
-                      setActiveConfigTab('agents');
-                    }
-                  }}
-                  disabled={!selectedAgent}
-                >
-                  <Settings size={16} />
-                  <span>设置</span>
-                </button>
-              </div>
+                  }
+                }}
+                disabled={!selectedAgent}
+              >
+                <Settings size={16} />
+                <span>设置</span>
+              </button>
             </div>
 
             <div className="workbench-grid">

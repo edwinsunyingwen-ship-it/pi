@@ -3337,15 +3337,12 @@ select:focus {
 }
 
 .app-shell > .dashboard-grid {
-  align-content: start;
   border: 0;
   border-radius: 0;
-  display: block;
   grid-column: 2;
   grid-row: 1;
   height: 100vh;
   overflow: hidden;
-  padding: 18px 20px;
 }
 
 .app-shell > .dashboard-grid .workbench-grid {
@@ -3358,25 +3355,6 @@ select:focus {
 
 .app-shell > .dashboard-grid .session-sidebar {
   display: none;
-}
-
-.app-shell > .dashboard-grid .workbench-shell {
-  grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - 36px);
-}
-
-.app-shell > .dashboard-grid .agent-tabs {
-  margin-top: 0;
-}
-
-.app-shell > .dashboard-grid .agent-tab-actions {
-  display: flex;
-}
-
-.app-shell > .dashboard-grid .icon-only-button {
-  justify-content: center;
-  min-width: 42px;
-  padding: 0;
 }
 
 .sidebar-conversations {
