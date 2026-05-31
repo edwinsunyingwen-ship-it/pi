@@ -19,6 +19,8 @@ const api: WindowsClientApi = {
 	getWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.getWorkspace),
 	chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
 	listAuditLogs: (query) => ipcRenderer.invoke(IPC_CHANNELS.auditListLogs, query),
+	getConversationStore: () => ipcRenderer.invoke(IPC_CHANNELS.conversationStoreGet),
+	saveConversationStore: (store) => ipcRenderer.invoke(IPC_CHANNELS.conversationStoreSave, store),
 	listWorkspaceFiles: (workspacePath) => ipcRenderer.invoke(IPC_CHANNELS.workspaceListFiles, workspacePath),
 	readWorkspaceFile: (relativePath, workspacePath) =>
 		ipcRenderer.invoke(IPC_CHANNELS.workspaceReadFile, relativePath, workspacePath),

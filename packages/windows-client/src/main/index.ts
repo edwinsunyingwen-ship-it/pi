@@ -17,6 +17,7 @@ import { AgentService } from "./services/agentService";
 import { AuditLogger } from "./services/auditLogger";
 import { BrowserToolService } from "./services/browserToolService";
 import { ConfigService } from "./services/configService";
+import { ConversationStoreService } from "./services/conversationStoreService";
 import { WorkspaceFileService } from "./services/workspaceFileService";
 import { WorkspaceService } from "./services/workspaceService";
 
@@ -25,6 +26,7 @@ const configService = new ConfigService(auditLogger);
 const workspaceService = new WorkspaceService(auditLogger);
 const workspaceFileService = new WorkspaceFileService(workspaceService, auditLogger);
 const browserToolService = new BrowserToolService(auditLogger);
+const conversationStoreService = new ConversationStoreService();
 const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
 const mainDir = dirname(fileURLToPath(import.meta.url));
@@ -114,6 +116,8 @@ function registerIpcHandlers(): void {
 		workspaceFileService.readFile(relativePath, workspacePath),
 	);
 	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, query?: AuditLogQuery) => auditLogger.listRecent(query));
+	ipcMain.handle(IPC_CHANNELS.conversationStoreGet, () => conversationStoreService.getStore());
+	ipcMain.handle(IPC_CHANNELS.conversationStoreSave, (_event, store) => conversationStoreService.saveStore(store));
 
 	ipcMain.handle(IPC_CHANNELS.agentStartSession, (_event, agentId?: string, workspacePath?: string | null) =>
 		agentService.startSession(agentId, workspacePath),

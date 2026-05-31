@@ -17,6 +17,8 @@ export const IPC_CHANNELS = {
 	workspaceListFiles: "workspace:list-files",
 	workspaceReadFile: "workspace:read-file",
 	auditListLogs: "audit:list-logs",
+	conversationStoreGet: "conversation-store:get",
+	conversationStoreSave: "conversation-store:save",
 	agentStartSession: "agent:start-session",
 	agentStopSession: "agent:stop-session",
 	agentGetSessionState: "agent:get-session-state",

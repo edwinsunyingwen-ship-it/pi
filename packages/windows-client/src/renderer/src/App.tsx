@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type {
   AgentConfig,
+  ConversationStoreState,
   AgentRuleConfig,
   AgentSession,
   AgentTaskTemplate,
@@ -34,6 +35,7 @@ import type {
   ModelInputCapability,
   ModelProfileConfig,
   ModelSetupMode,
+  StoredAgentConversation,
   WorkspaceFileInfo,
   WorkspaceState,
 } from '../../shared/types';
@@ -599,6 +601,43 @@ function createAgentConversation(agent: AgentConfig | null | undefined): AgentCo
   };
 }
 
+function conversationFromStoredConversation(conversation: StoredAgentConversation): AgentConversationState {
+  return {
+    ...conversation,
+    session: null,
+    transcript: conversation.transcript.map((item) => ({ ...item })),
+    workspace: { ...conversation.workspace },
+  };
+}
+
+function conversationToStoredConversation(conversation: AgentConversationState): StoredAgentConversation {
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+    transcript: conversation.transcript.map((item) => ({ ...item })),
+    draftMessage: conversation.draftMessage,
+    workspace: { ...conversation.workspace },
+  };
+}
+
+function createConversationStoreState(
+  conversationsByAgentId: Record<string, AgentConversationState[]>,
+  activeConversationIdsByAgentId: Record<string, string>,
+): ConversationStoreState {
+  return {
+    conversationsByAgentId: Object.fromEntries(
+      Object.entries(conversationsByAgentId).map(([agentId, conversations]) => [
+        agentId,
+        conversations.map((conversation) => conversationToStoredConversation(conversation)),
+      ]),
+    ),
+    activeConversationIdsByAgentId,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function createConversationTitleFromMessage(message: string): string {
   const compactMessage = message.replace(/\s+/g, ' ').trim();
   if (!compactMessage) {
@@ -645,6 +684,7 @@ function App(): ReactElement {
   );
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [conversationRevision, setConversationRevision] = useState(0);
+  const conversationStoreLoadedRef = useRef(false);
   const [startingConversationId, setStartingConversationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAgentId, setSearchAgentId] = useState('');
@@ -888,7 +928,17 @@ function App(): ReactElement {
       ...activeConversationIdsRef.current,
       [agentId]: nextConversation.id,
     };
+    persistConversationStore();
     setConversationRevision((revision) => revision + 1);
+  }
+
+  function persistConversationStore(): void {
+    if (!conversationStoreLoadedRef.current) {
+      return;
+    }
+
+    const store = createConversationStoreState(agentConversationsRef.current, activeConversationIdsRef.current);
+    void window.windowsClient.saveConversationStore(store);
   }
 
   function saveCurrentConversation(patch: Partial<AgentConversationState> = {}): void {
@@ -937,6 +987,7 @@ function App(): ReactElement {
       ...activeConversationIdsRef.current,
       [selectedAgent.id]: conversationId,
     };
+    persistConversationStore();
     setAgentNotice(null);
     setConversationRevision((revision) => revision + 1);
   }
@@ -946,6 +997,7 @@ function App(): ReactElement {
       ...activeConversationIdsRef.current,
       [match.agentId]: match.conversationId,
     };
+    persistConversationStore();
     selectedAgentIdRef.current = match.agentId;
     setSelectedAgentId(match.agentId);
     setSearchNavigationTarget({
@@ -962,13 +1014,35 @@ function App(): ReactElement {
 
   async function refreshInitialState(): Promise<void> {
     const initialAuditQuery = createDefaultAuditQuery();
-    const [nextEnvironment, nextConfig, nextWorkspace, nextTools, nextAudit] = await Promise.all([
+    const [nextEnvironment, nextConfig, nextWorkspace, nextTools, nextAudit, nextConversationStore] = await Promise.all([
       window.windowsClient.getEnvironment(),
       window.windowsClient.getClientConfig(),
       window.windowsClient.getWorkspace(),
       window.windowsClient.listAvailableTools(),
       window.windowsClient.listAuditLogs(initialAuditQuery),
+      window.windowsClient.getConversationStore(),
     ]);
+
+    const nextConversations = Object.fromEntries(
+      Object.entries(nextConversationStore.conversationsByAgentId).map(([agentId, conversations]) => [
+        agentId,
+        conversations.map((conversation) => conversationFromStoredConversation(conversation)),
+      ]),
+    );
+    for (const agent of nextConfig.config.agents) {
+      if (!nextConversations[agent.id]?.length) {
+        nextConversations[agent.id] = [createAgentConversation(agent)];
+      }
+    }
+    const nextActiveConversationIds = { ...nextConversationStore.activeConversationIdsByAgentId };
+    for (const [agentId, conversations] of Object.entries(nextConversations)) {
+      if (!conversations.some((conversation) => conversation.id === nextActiveConversationIds[agentId])) {
+        nextActiveConversationIds[agentId] = conversations[0]?.id ?? '';
+      }
+    }
+    agentConversationsRef.current = nextConversations;
+    activeConversationIdsRef.current = nextActiveConversationIds;
+    conversationStoreLoadedRef.current = true;
 
     setEnvironment(nextEnvironment);
     setConfigState(nextConfig);
@@ -989,6 +1063,8 @@ function App(): ReactElement {
     setAuditRefreshedAt(new Date().toISOString());
     setAuditTotal(nextAudit.total);
     setAuditHasMore(nextAudit.hasMore);
+    setConversationRevision((revision) => revision + 1);
+    persistConversationStore();
 
     if (nextWorkspace.path) {
       await refreshWorkspaceFiles();

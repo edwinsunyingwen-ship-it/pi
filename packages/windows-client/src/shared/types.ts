@@ -57,6 +57,28 @@ export interface AgentMessageResult {
 	capabilityCalls?: AgentCapabilityCallLog[];
 }
 
+export interface ConversationTranscriptItem {
+	role: "user" | "assistant";
+	text: string;
+	createdAt: string;
+}
+
+export interface StoredAgentConversation {
+	id: string;
+	title: string;
+	createdAt: string;
+	updatedAt: string;
+	transcript: ConversationTranscriptItem[];
+	draftMessage: string;
+	workspace: WorkspaceState;
+}
+
+export interface ConversationStoreState {
+	conversationsByAgentId: Record<string, StoredAgentConversation[]>;
+	activeConversationIdsByAgentId: Record<string, string>;
+	updatedAt: string;
+}
+
 export interface AgentCapabilityCallLog {
 	toolCallId?: string;
 	toolName: string;
@@ -335,6 +357,8 @@ export interface WindowsClientApi {
 	getWorkspace: () => Promise<WorkspaceState>;
 	chooseWorkspace: () => Promise<WorkspaceState>;
 	listAuditLogs: (query?: AuditLogQuery) => Promise<AuditLogListResult>;
+	getConversationStore: () => Promise<ConversationStoreState>;
+	saveConversationStore: (store: ConversationStoreState) => Promise<ConversationStoreState>;
 	listWorkspaceFiles: (workspacePath?: string | null) => Promise<WorkspaceFileListResult>;
 	readWorkspaceFile: (relativePath: string, workspacePath?: string | null) => Promise<WorkspaceFileReadResult>;
 	startAgentSession: (agentId?: string, workspacePath?: string | null) => Promise<AgentSession>;

@@ -3494,6 +3494,8 @@ select:focus {
 .app-shell > .dashboard-grid .workbench-shell {
   grid-template-rows: auto minmax(0, 1fr);
   height: calc(100vh - 36px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-shell > .dashboard-grid .agent-tabs {
@@ -3511,8 +3513,29 @@ select:focus {
 }
 
 .sidebar-conversations {
+  flex: 1 1 auto;
   min-height: 140px;
   overflow-y: auto;
+}
+
+.app-shell > .dashboard-grid .workbench-grid,
+.app-shell > .dashboard-grid .chat-workspace {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell > .dashboard-grid .focused-conversation {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.app-shell > .dashboard-grid .chat-header,
+.app-shell > .dashboard-grid .workbench-actions,
+.app-shell > .dashboard-grid .workbench-footer,
+.app-shell > .dashboard-grid .workbench-composer {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 760px) {
