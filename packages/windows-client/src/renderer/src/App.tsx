@@ -39,6 +39,8 @@ import type {
   WorkspaceFileInfo,
   WorkspaceState,
 } from '../../shared/types';
+import { InlineNotice } from './components/ui/InlineNotice';
+import { PaginationBar } from './components/ui/PaginationBar';
 import { highlightSearchText, searchConversations } from './conversation-search';
 import type { ConversationSearchMatch, SearchableConversation } from './conversation-search';
 import './styles.css';
@@ -2241,7 +2243,7 @@ function App(): ReactElement {
                   </div>
                 </div>
 
-                {agentNotice && <div className={`inline-notice ${agentNotice.tone}`}>{agentNotice.text}</div>}
+                {agentNotice && <InlineNotice tone={agentNotice.tone} text={agentNotice.text} />}
 
                 <div className="conversation-list focused-conversation">
                   {transcript.length === 0 ? (
@@ -2535,7 +2537,7 @@ function App(): ReactElement {
                   </dd>
                 </div>
               </dl>
-              {agentNotice && <div className={`inline-notice ${agentNotice.tone}`}>{agentNotice.text}</div>}
+              {agentNotice && <InlineNotice tone={agentNotice.tone} text={agentNotice.text} />}
               <div className="button-row">
                 <button type="button" className="secondary-button" onClick={() => startSession({ force: true })}>
                   <Bot size={18} />
@@ -2592,7 +2594,7 @@ function App(): ReactElement {
 
         {activeSection === 'config' && (
           <>
-        <article className="panel wide-panel">
+        <article className="panel wide-panel config-panel">
           <div className="panel-heading with-action">
             <div>
               <Settings size={20} />
@@ -2602,7 +2604,7 @@ function App(): ReactElement {
           <p className="subtle-text">
             {configState ? `配置文件：${configState.configPath}` : '正在读取客户端配置。'}
           </p>
-          {configNotice && <div className={`inline-notice ${configNotice.tone}`}>{configNotice.text}</div>}
+          {configNotice && <InlineNotice tone={configNotice.tone} text={configNotice.text} />}
           {draftConfig && (
               <div className="settings-stack">
               <nav className="config-tabs" aria-label="配置中心子菜单">
@@ -2699,7 +2701,7 @@ function App(): ReactElement {
               )}
 
               {activeConfigTab === 'core' && (
-              <section className="config-block">
+              <section className="config-block list-page">
                 <div className="section-title-row">
                   <div>
                     <strong>智能体内核 / RPC</strong>
@@ -2836,7 +2838,7 @@ function App(): ReactElement {
                   </div>
                 </div>
 
-                <div className="model-list">
+                <div className="model-list list-page-body">
                   {filteredModels.length === 0 ? (
                     <p className="empty-state">暂无匹配模型。可以新增官方 Provider、本地模型或自定义模型。</p>
                   ) : (
@@ -2898,11 +2900,25 @@ function App(): ReactElement {
                     ))
                   )}
                 </div>
+                <div className="list-page-footer">
+                  <span>已显示 {filteredModels.length} / {draftConfig.model.models.length} 个模型</span>
+                  <button
+                    type="button"
+                    className="primary-action-button compact-button"
+                    onClick={() => {
+                      setModelEditorNotice(null);
+                      setModelEditor(createModelProfile());
+                    }}
+                  >
+                    <Plus size={16} />
+                    <span>新增模型</span>
+                  </button>
+                </div>
               </section>
               )}
 
               {activeConfigTab === 'capabilities' && (
-              <section className="config-block">
+              <section className="config-block list-page">
                 <div className="section-title-row">
                   <div>
                     <strong>业务能力 / Tools & Skills</strong>
@@ -2976,6 +2992,7 @@ function App(): ReactElement {
                   </div>
                 </div>
 
+                <div className="list-page-body">
                 <div className="capability-table">
                   {filteredCapabilities.length === 0 ? (
                     <p className="empty-state">暂无匹配能力。可以新增 HTTP API、本地命令、MCP 工具或 Skill。</p>
@@ -3044,6 +3061,14 @@ function App(): ReactElement {
                       </small>
                     </div>
                   ))}
+                </div>
+                </div>
+                <div className="list-page-footer">
+                  <span>已显示 {filteredCapabilities.length} / {draftConfig.capabilities.length} 个能力</span>
+                  <button type="button" className="primary-action-button compact-button" onClick={() => setCapabilityEditor(createCapabilityConfig())}>
+                    <Plus size={16} />
+                    <span>新增能力</span>
+                  </button>
                 </div>
               </section>
               )}
@@ -3189,16 +3214,12 @@ function App(): ReactElement {
                 </>
               )}
             </div>
-            <div className="audit-pagination">
-              <span>
-                已显示 {auditEntries.length} / {auditTotal} 条
-              </span>
-              {auditHasMore && (
-                <button type="button" className="secondary-button" onClick={loadMoreAuditLogs}>
-                  加载更多
-                </button>
-              )}
-            </div>
+            <PaginationBar
+              summary={`已显示 ${auditEntries.length} / ${auditTotal} 条`}
+              hasMore={auditHasMore}
+              nextLabel="加载更多"
+              onNext={loadMoreAuditLogs}
+            />
           </article>
         )}
       </section>
@@ -3559,7 +3580,7 @@ function App(): ReactElement {
               </button>
             </div>
             {modelEditorNotice && (
-              <div className={`inline-notice ${modelEditorNotice.tone}`}>{modelEditorNotice.text}</div>
+              <InlineNotice tone={modelEditorNotice.tone} text={modelEditorNotice.text} />
             )}
 
             <div className="model-form-layout">

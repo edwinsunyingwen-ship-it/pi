@@ -1461,6 +1461,48 @@ dd {
   padding-top: 16px;
 }
 
+.config-panel,
+.settings-stack,
+.config-block.list-page {
+  min-height: 0;
+}
+
+.config-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.settings-stack {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.config-block.list-page {
+  flex: 1 1 auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.list-page-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.list-page-footer {
+  align-items: center;
+  border-top: 1px solid #ebe4db;
+  color: #6b6258;
+  display: flex;
+  flex: 0 0 auto;
+  font-weight: 800;
+  gap: 12px;
+  justify-content: space-between;
+  padding-top: 12px;
+}
+
 .config-tabs {
   background: #f1f7f5;
   border: 1px solid #d8e8df;
@@ -3391,6 +3433,48 @@ select:focus {
   justify-content: space-between;
   margin-top: 8px;
   padding-top: 14px;
+}
+
+.app-shell > .dashboard-grid > .config-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.app-shell > .dashboard-grid > .config-panel > .panel-heading,
+.app-shell > .dashboard-grid > .config-panel > .subtle-text,
+.app-shell > .dashboard-grid > .config-panel > .inline-notice {
+  flex: 0 0 auto;
+}
+
+.app-shell > .dashboard-grid .settings-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app-shell > .dashboard-grid .config-tabs,
+.app-shell > .dashboard-grid .config-block.list-page > .section-title-row,
+.app-shell > .dashboard-grid .config-block.list-page > .model-toolbar,
+.app-shell > .dashboard-grid .config-block.list-page > .list-page-footer {
+  flex: 0 0 auto;
+}
+
+.app-shell > .dashboard-grid .config-block.list-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell > .dashboard-grid .list-page-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.app-shell > .dashboard-grid .list-page-footer {
+  border-top-color: #eef1f5;
+  min-height: 56px;
 }
 
 @media (max-width: 1100px) {
