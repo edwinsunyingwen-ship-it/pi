@@ -72,6 +72,7 @@ interface SearchNavigationTarget {
 }
 
 const auditPageSize = 100;
+const auditContentPreviewMaxLength = 120;
 
 const auditActionLabels: Record<string, string> = {
   'select-workspace': '选择工作区',
@@ -525,6 +526,27 @@ function formatLocalTimestamp(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
 }
 
+function getAuditStartTime(entry: AuditLogEntry): string {
+  return entry.operationStartedAt ?? entry.timestamp;
+}
+
+function getAuditEndTime(entry: AuditLogEntry): string | null {
+  if (!entry.operationEndedAt || entry.operationEndedAt === getAuditStartTime(entry)) {
+    return null;
+  }
+  return entry.operationEndedAt;
+}
+
+function getAuditContent(entry: AuditLogEntry): string {
+  return entry.outputSummary ?? entry.inputSummary ?? entry.errorMessage ?? entry.toolName;
+}
+
+function getAuditContentPreview(content: string): string {
+  return content.length > auditContentPreviewMaxLength
+    ? `${content.slice(0, auditContentPreviewMaxLength).trimEnd()}...`
+    : content;
+}
+
 function getMessageAnchorId(conversationId: string, messageIndex: number): string {
   return `${conversationId}:${messageIndex}`;
 }
@@ -613,6 +635,7 @@ function App(): ReactElement {
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditHasMore, setAuditHasMore] = useState(false);
   const [auditTimeRangeLocked, setAuditTimeRangeLocked] = useState(false);
+  const [expandedAuditEntry, setExpandedAuditEntry] = useState<AuditLogEntry | null>(null);
   const [statusText, setStatusText] = useState('就绪');
   const [agentNotice, setAgentNotice] = useState<LocalNotice | null>(null);
   const [configNotice, setConfigNotice] = useState<LocalNotice | null>(null);
@@ -3053,16 +3076,41 @@ function App(): ReactElement {
               {auditEntries.length === 0 ? (
                 <p className="empty-state">暂无操作记录。</p>
               ) : (
-                auditEntries.map((entry) => (
-                  <div className="audit-row" key={`${entry.timestamp}-${entry.businessAction}`}>
-                    <strong>{auditActionLabels[entry.businessAction] ?? entry.businessAction}</strong>
-                    <span>{new Date(entry.timestamp).toLocaleString('zh-CN')}</span>
-                    <p>{entry.outputSummary ?? entry.inputSummary ?? entry.toolName}</p>
-                    <small className={entry.status === 'success' ? 'enabled' : 'disabled'}>
-                      {entry.status === 'success' ? '成功' : '失败'}
-                    </small>
+                <>
+                  <div className="audit-row audit-header">
+                    <strong>操作类型</strong>
+                    <strong>开始时间</strong>
+                    <strong>结束时间</strong>
+                    <strong>操作内容</strong>
                   </div>
-                ))
+                  {auditEntries.map((entry, index) => {
+                    const content = getAuditContent(entry);
+                    const isLongContent = content.length > auditContentPreviewMaxLength;
+
+                    return (
+                      <div className="audit-row" key={`${entry.timestamp}-${entry.businessAction}-${entry.toolName}-${index}`}>
+                        <strong>{auditActionLabels[entry.businessAction] ?? entry.businessAction}</strong>
+                        <span>{formatLocalTimestamp(getAuditStartTime(entry))}</span>
+                        <span>{getAuditEndTime(entry) ? formatLocalTimestamp(getAuditEndTime(entry) as string) : '-'}</span>
+                        <div className="audit-content-cell">
+                          <p className="audit-content-preview">{getAuditContentPreview(content)}</p>
+                          {isLongContent && (
+                            <button
+                              type="button"
+                              className="audit-more-button"
+                              onClick={() => setExpandedAuditEntry(entry)}
+                            >
+                              查看更多
+                            </button>
+                          )}
+                        </div>
+                        <small className={entry.status === 'success' ? 'enabled' : 'disabled'}>
+                          {entry.status === 'success' ? '成功' : '失败'}
+                        </small>
+                      </div>
+                    );
+                  })}
+                </>
               )}
             </div>
             <div className="audit-pagination">
@@ -3078,6 +3126,35 @@ function App(): ReactElement {
           </article>
         )}
       </section>
+
+      {expandedAuditEntry && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-panel audit-detail-modal" role="dialog" aria-modal="true" aria-label="完整日志内容">
+            <div className="panel-heading with-action">
+              <div>
+                <ListChecks size={20} />
+                <h3>完整日志内容</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setExpandedAuditEntry(null)}
+                aria-label="关闭"
+              >
+                关闭
+              </button>
+            </div>
+            <div className="audit-detail-meta">
+              <span>{auditActionLabels[expandedAuditEntry.businessAction] ?? expandedAuditEntry.businessAction}</span>
+              <span>{formatLocalTimestamp(getAuditStartTime(expandedAuditEntry))}</span>
+              <small className={expandedAuditEntry.status === 'success' ? 'enabled' : 'disabled'}>
+                {expandedAuditEntry.status === 'success' ? '成功' : '失败'}
+              </small>
+            </div>
+            <pre className="audit-detail-content">{getAuditContent(expandedAuditEntry)}</pre>
+          </section>
+        </div>
+      )}
 
       {agentEditor && draftConfig && (
         <div className="modal-backdrop" role="presentation">

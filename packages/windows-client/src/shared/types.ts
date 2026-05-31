@@ -2,6 +2,8 @@ export type AuditStatus = "success" | "failure";
 
 export interface AuditLogEntry {
 	timestamp: string;
+	operationStartedAt?: string;
+	operationEndedAt?: string;
 	sessionId?: string;
 	workflowId?: string;
 	workspacePath?: string;

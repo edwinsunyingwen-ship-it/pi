@@ -330,6 +330,8 @@ export class AgentService {
 		sessionId?: string;
 		toolName?: string;
 		businessAction: string;
+		operationStartedAt?: string;
+		operationEndedAt?: string;
 		inputSummary?: string;
 		outputSummary?: string;
 		status: AuditStatus;
@@ -338,6 +340,8 @@ export class AgentService {
 		const workspace = await this.workspaceService.getWorkspace();
 		await this.auditLogger.write({
 			timestamp: new Date().toISOString(),
+			operationStartedAt: options.operationStartedAt,
+			operationEndedAt: options.operationEndedAt,
 			sessionId: options.sessionId,
 			workspacePath: workspace.path ?? undefined,
 			toolName: options.toolName ?? "agent-adapter",
@@ -371,6 +375,7 @@ export class AgentService {
 					sessionId,
 					toolName: call.toolName,
 					businessAction: "capability-invoked",
+					operationStartedAt: call.startedAt,
 					inputSummary: this.truncate(this.redactSensitive(call.inputSummary), 500),
 					outputSummary: `调用能力：${displayName}；${toolMeta}`,
 					status: "success",
@@ -384,6 +389,8 @@ export class AgentService {
 				sessionId,
 				toolName: call.toolName,
 				businessAction: "capability-result",
+				operationStartedAt: call.startedAt,
+				operationEndedAt: call.endedAt,
 				inputSummary: call.inputSummary ? this.truncate(this.redactSensitive(call.inputSummary), 240) : undefined,
 				outputSummary: this.truncate(`${toolMeta}；返回：${resultSummary}`, 500),
 				status: call.status,
