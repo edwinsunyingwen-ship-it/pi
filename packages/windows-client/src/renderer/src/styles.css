@@ -183,11 +183,13 @@ select:focus {
   flex-direction: column;
   gap: 2px;
   min-height: 52px;
+  position: relative;
 }
 
 .sidebar-thread span,
 .sidebar-thread small {
   overflow: hidden;
+  padding-right: 30px;
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
@@ -195,6 +197,56 @@ select:focus {
 
 .sidebar-thread.active {
   border-color: #c9ded5;
+}
+
+.sidebar-thread-menu-button {
+  background: transparent;
+  color: #6d665d;
+  display: none;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0;
+  position: absolute;
+  right: 6px;
+  top: 8px;
+  width: 28px;
+}
+
+.sidebar-thread:hover .sidebar-thread-menu-button,
+.sidebar-thread:focus-within .sidebar-thread-menu-button {
+  display: inline-flex;
+}
+
+.sidebar-thread-menu-button:hover {
+  background: #dce8e1;
+}
+
+.sidebar-thread-menu {
+  background: #fffdfa;
+  border: 1px solid #d9d1c7;
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgb(20 24 24 / 12%);
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  position: absolute;
+  right: 6px;
+  top: 38px;
+  width: 96px;
+  z-index: 5;
+}
+
+.sidebar-thread-menu button {
+  background: transparent;
+  color: #33302c;
+  justify-content: flex-start;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.sidebar-thread-menu button:hover {
+  background: #e5eee8;
+  color: #1f4d45;
 }
 
 .muted-thread {
@@ -2051,14 +2103,14 @@ dd {
   border: 1px solid transparent;
   color: #5b5751;
   display: inline-flex;
-  font-size: 1.6rem;
-  font-weight: 600;
+  font-size: 0.92rem;
+  font-weight: 800;
   height: 34px;
   justify-content: center;
   line-height: 1;
   min-height: 34px;
-  padding: 0;
-  width: 34px;
+  padding: 0 12px;
+  width: auto;
 }
 
 .modal-close-button:hover {
@@ -2141,6 +2193,33 @@ dd {
 .audit-pagination span {
   color: #5b5751;
   font-weight: 700;
+}
+
+.pagination-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.pagination-jump {
+  align-items: center;
+  color: #6b6258;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.pagination-jump input {
+  min-height: 34px;
+  padding: 0 8px;
+  text-align: center;
+  width: 66px;
+}
+
+.legacy-list-footer {
+  display: none;
 }
 
 .enabled {

@@ -85,6 +85,7 @@ export class ConversationStoreService {
 			title: typeof value.title === "string" && value.title.trim() ? value.title : "新对话",
 			createdAt: typeof value.createdAt === "string" ? value.createdAt : now,
 			updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : now,
+			archivedAt: typeof value.archivedAt === "string" ? value.archivedAt : null,
 			transcript: Array.isArray(value.transcript)
 				? value.transcript
 						.map((item) => {

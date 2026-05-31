@@ -68,6 +68,7 @@ export interface StoredAgentConversation {
 	title: string;
 	createdAt: string;
 	updatedAt: string;
+	archivedAt?: string | null;
 	transcript: ConversationTranscriptItem[];
 	draftMessage: string;
 	workspace: WorkspaceState;

@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Laptop,
   ListChecks,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Save,
@@ -61,6 +62,7 @@ interface AgentConversationState {
   title: string;
   createdAt: string;
   updatedAt: string;
+  archivedAt: string | null;
   session: AgentSession | null;
   transcript: TranscriptItem[];
   draftMessage: string;
@@ -75,7 +77,10 @@ interface SearchNavigationTarget {
   query: string;
 }
 
+const modelPageSize = 20;
+const capabilityPageSize = 20;
 const auditPageSize = 100;
+const maxConversationTitleLength = 60;
 const auditContentPreviewMaxLength = 120;
 
 const auditActionLabels: Record<string, string> = {
@@ -596,6 +601,7 @@ function createAgentConversation(agent: AgentConfig | null | undefined): AgentCo
     title: agent ? `${agent.name} 会话` : '新的会话',
     createdAt,
     updatedAt: createdAt,
+    archivedAt: null,
     session: null,
     transcript: [],
     draftMessage: '',
@@ -607,6 +613,7 @@ function conversationFromStoredConversation(conversation: StoredAgentConversatio
   return {
     ...conversation,
     session: null,
+    archivedAt: conversation.archivedAt ?? null,
     transcript: conversation.transcript.map((item) => ({ ...item })),
     workspace: { ...conversation.workspace },
   };
@@ -618,6 +625,7 @@ function conversationToStoredConversation(conversation: AgentConversationState):
     title: conversation.title,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    archivedAt: conversation.archivedAt,
     transcript: conversation.transcript.map((item) => ({ ...item })),
     draftMessage: conversation.draftMessage,
     workspace: { ...conversation.workspace },
@@ -660,6 +668,13 @@ function getConversationDisplayTitle(conversation: AgentConversationState, agent
   return firstUserMessage ? createConversationTitleFromMessage(firstUserMessage) : '新对话';
 }
 
+function hydrateModelAgentUsage(model: ModelProfileConfig, agents: AgentConfig[]): ModelProfileConfig {
+  return {
+    ...model,
+    usedByAgentIds: agents.filter((agent) => agent.modelIds.includes(model.id)).map((agent) => agent.id),
+  };
+}
+
 function App(): ReactElement {
   const [environment, setEnvironment] = useState<AppEnvironment | null>(null);
   const [configState, setConfigState] = useState<ClientConfigState | null>(null);
@@ -674,7 +689,6 @@ function App(): ReactElement {
   const [auditRefreshedAt, setAuditRefreshedAt] = useState<string | null>(null);
   const [auditQuery, setAuditQuery] = useState<AuditLogQuery>(() => createDefaultAuditQuery());
   const [auditTotal, setAuditTotal] = useState(0);
-  const [auditHasMore, setAuditHasMore] = useState(false);
   const [auditTimeRangeLocked, setAuditTimeRangeLocked] = useState(false);
   const [expandedAuditEntry, setExpandedAuditEntry] = useState<AuditLogEntry | null>(null);
   const [statusText, setStatusText] = useState('就绪');
@@ -695,7 +709,7 @@ function App(): ReactElement {
   const activeConversationIdsRef = useRef<Record<string, string>>({});
   const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities'>(
+  const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities' | 'archived'>(
     'models',
   );
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -708,6 +722,8 @@ function App(): ReactElement {
     reasoning: '',
   });
   const [modelEditor, setModelEditor] = useState<ModelProfileConfig | null>(null);
+  const [modelPage, setModelPage] = useState(1);
+  const [modelPageInput, setModelPageInput] = useState('1');
   const [capabilityFilters, setCapabilityFilters] = useState({
     type: '',
     executionMode: '',
@@ -715,7 +731,13 @@ function App(): ReactElement {
     triggerMode: '',
   });
   const [capabilityEditor, setCapabilityEditor] = useState<CapabilityConfig | null>(null);
+  const [capabilityPage, setCapabilityPage] = useState(1);
+  const [capabilityPageInput, setCapabilityPageInput] = useState('1');
+  const [auditPageInput, setAuditPageInput] = useState('1');
   const [agentEditor, setAgentEditor] = useState<AgentConfig | null>(null);
+  const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
+  const [renamingConversation, setRenamingConversation] = useState<AgentConversationState | null>(null);
+  const [renameConversationTitle, setRenameConversationTitle] = useState('');
 
   useEffect(() => {
     void refreshInitialState();
@@ -773,6 +795,41 @@ function App(): ReactElement {
     });
   }, [draftConfig?.capabilities, capabilityFilters]);
 
+  const modelTotalPages = Math.max(1, Math.ceil(filteredModels.length / modelPageSize));
+  const pagedModels = useMemo(() => {
+    const safePage = Math.min(modelPage, modelTotalPages);
+    return filteredModels.slice((safePage - 1) * modelPageSize, safePage * modelPageSize);
+  }, [filteredModels, modelPage, modelTotalPages]);
+  const capabilityTotalPages = Math.max(1, Math.ceil(filteredCapabilities.length / capabilityPageSize));
+  const pagedCapabilities = useMemo(() => {
+    const safePage = Math.min(capabilityPage, capabilityTotalPages);
+    return filteredCapabilities.slice((safePage - 1) * capabilityPageSize, safePage * capabilityPageSize);
+  }, [capabilityPage, capabilityTotalPages, filteredCapabilities]);
+
+  useEffect(() => {
+    setModelPage(1);
+    setModelPageInput('1');
+  }, [modelFilters]);
+
+  useEffect(() => {
+    if (modelPage > modelTotalPages) {
+      setModelPage(modelTotalPages);
+      setModelPageInput(String(modelTotalPages));
+    }
+  }, [modelPage, modelTotalPages]);
+
+  useEffect(() => {
+    setCapabilityPage(1);
+    setCapabilityPageInput('1');
+  }, [capabilityFilters]);
+
+  useEffect(() => {
+    if (capabilityPage > capabilityTotalPages) {
+      setCapabilityPage(capabilityTotalPages);
+      setCapabilityPageInput(String(capabilityTotalPages));
+    }
+  }, [capabilityPage, capabilityTotalPages]);
+
   const defaultModelDisplayName = useMemo(() => {
     const models = draftConfig?.model.models ?? [];
     const defaultModel = models.find((model) => model.id === draftConfig?.model.defaultModelId);
@@ -796,6 +853,25 @@ function App(): ReactElement {
         transcript: conversation.transcript.map((item) => ({ ...item })),
       })),
     );
+  }, [draftConfig?.agents, conversationRevision]);
+
+  const archivedConversations = useMemo(() => {
+    const agentNameById = new Map((draftConfig?.agents ?? []).map((agent) => [agent.id, agent.name]));
+    return Object.entries(agentConversationsRef.current)
+      .flatMap(([agentId, conversations]) =>
+        conversations
+          .filter((conversation) => conversation.archivedAt)
+          .map((conversation) => ({
+            agentId,
+            agentName: agentNameById.get(agentId) ?? '未命名智能体',
+            conversation,
+          })),
+      )
+      .sort((first, second) =>
+        (second.conversation.archivedAt ?? second.conversation.updatedAt).localeCompare(
+          first.conversation.archivedAt ?? first.conversation.updatedAt,
+        ),
+      );
   }, [draftConfig?.agents, conversationRevision]);
 
   const searchableAgentOptions = useMemo(() => {
@@ -868,7 +944,9 @@ function App(): ReactElement {
   const sessionReady = Boolean(session && session.state !== 'stopped');
   const sessionStarting = startingConversationId === selectedConversation.id;
   const selectedAgentConversations = selectedAgent
-    ? agentConversationsRef.current[selectedAgent.id] ?? [selectedConversation]
+    ? (agentConversationsRef.current[selectedAgent.id] ?? [selectedConversation]).filter(
+        (conversation) => !conversation.archivedAt,
+      )
     : [];
 
   useEffect(() => {
@@ -884,6 +962,7 @@ function App(): ReactElement {
   useEffect(() => {
     if (
       !selectedAgent ||
+      selectedConversation.archivedAt ||
       sessionReady ||
       sessionStarting ||
       manualStoppedConversationIdsRef.current.has(selectedConversation.id)
@@ -892,7 +971,7 @@ function App(): ReactElement {
     }
 
     void startSession({ silent: true });
-  }, [selectedAgent?.id, selectedConversation.id, sessionReady, sessionStarting]);
+  }, [selectedAgent?.id, selectedConversation.id, selectedConversation.archivedAt, sessionReady, sessionStarting]);
 
   useEffect(() => {
     if (
@@ -994,6 +1073,81 @@ function App(): ReactElement {
     setConversationRevision((revision) => revision + 1);
   }
 
+  function openRenameConversation(conversation: AgentConversationState): void {
+    setConversationMenuId(null);
+    setRenamingConversation(conversation);
+    setRenameConversationTitle(getConversationDisplayTitle(conversation, selectedAgent));
+  }
+
+  function saveConversationRename(): void {
+    if (!selectedAgent || !renamingConversation) {
+      return;
+    }
+    const nextTitle = renameConversationTitle.trim();
+    if (!nextTitle) {
+      setAgentNotice({ tone: 'error', text: '会话名称不能为空。' });
+      return;
+    }
+    if (nextTitle.length > maxConversationTitleLength) {
+      setAgentNotice({ tone: 'error', text: `会话名称不能超过 ${maxConversationTitleLength} 个字符。` });
+      return;
+    }
+    commitAgentConversation(selectedAgent.id, {
+      ...renamingConversation,
+      title: nextTitle,
+    });
+    setRenamingConversation(null);
+    setRenameConversationTitle('');
+    setAgentNotice({ tone: 'success', text: '会话名称已更新。' });
+  }
+
+  function archiveConversation(conversation: AgentConversationState): void {
+    if (!selectedAgent) {
+      return;
+    }
+    const confirmed = window.confirm(`确认归档会话“${getConversationDisplayTitle(conversation, selectedAgent)}”吗？`);
+    if (!confirmed) {
+      return;
+    }
+    const agentConversations = agentConversationsRef.current[selectedAgent.id] ?? [];
+    const nextConversation = {
+      ...conversation,
+      archivedAt: new Date().toISOString(),
+    };
+    const nextConversations = agentConversations.map((item) =>
+      item.id === conversation.id ? nextConversation : item,
+    );
+    const nextActiveConversation =
+      nextConversations.find((item) => !item.archivedAt && item.id !== conversation.id) ??
+      createAgentConversation(selectedAgent);
+    agentConversationsRef.current = {
+      ...agentConversationsRef.current,
+      [selectedAgent.id]: nextConversations.some((item) => item.id === nextActiveConversation.id)
+        ? nextConversations
+        : [nextActiveConversation, ...nextConversations],
+    };
+    activeConversationIdsRef.current = {
+      ...activeConversationIdsRef.current,
+      [selectedAgent.id]: nextActiveConversation.id,
+    };
+    setConversationMenuId(null);
+    setActiveSection('config');
+    setActiveConfigTab('archived');
+    persistConversationStore();
+    setConversationRevision((revision) => revision + 1);
+  }
+
+  function openArchivedConversation(agentId: string, conversationId: string): void {
+    activeConversationIdsRef.current = {
+      ...activeConversationIdsRef.current,
+      [agentId]: conversationId,
+    };
+    selectedAgentIdRef.current = agentId;
+    setSelectedAgentId(agentId);
+    setActiveSection('workbench');
+    setConversationRevision((revision) => revision + 1);
+  }
+
   function openSearchResult(match: ConversationSearchMatch): void {
     activeConversationIdsRef.current = {
       ...activeConversationIdsRef.current,
@@ -1064,7 +1218,6 @@ function App(): ReactElement {
     setAuditPath(nextAudit.logFilePath);
     setAuditRefreshedAt(new Date().toISOString());
     setAuditTotal(nextAudit.total);
-    setAuditHasMore(nextAudit.hasMore);
     setConversationRevision((revision) => revision + 1);
     persistConversationStore();
 
@@ -1073,7 +1226,7 @@ function App(): ReactElement {
     }
   }
 
-  async function loadAuditLogs(query: AuditLogQuery, append = false): Promise<void> {
+  async function loadAuditLogs(query: AuditLogQuery): Promise<void> {
     const nextQuery: AuditLogQuery = {
       ...query,
       limit: auditPageSize,
@@ -1081,13 +1234,11 @@ function App(): ReactElement {
     };
     const result = await window.windowsClient.listAuditLogs(nextQuery);
     setAuditQuery(nextQuery);
-    setAuditEntries((current) =>
-      append ? sortAuditEntries([...current, ...result.entries]) : sortAuditEntries(result.entries),
-    );
+    setAuditEntries(sortAuditEntries(result.entries));
+    setAuditPageInput(String(Math.floor((nextQuery.offset ?? 0) / auditPageSize) + 1));
     setAuditPath(result.logFilePath);
     setAuditRefreshedAt(new Date().toISOString());
     setAuditTotal(result.total);
-    setAuditHasMore(result.hasMore);
   }
 
   async function refreshAuditLogs(): Promise<void> {
@@ -1110,8 +1261,34 @@ function App(): ReactElement {
     await loadAuditLogs(createDefaultAuditQuery());
   }
 
-  async function loadMoreAuditLogs(): Promise<void> {
-    await loadAuditLogs({ ...auditQuery, offset: auditEntries.length }, true);
+  function commitLocalPageInput(
+    value: string,
+    totalPages: number,
+    setPage: (page: number) => void,
+    setInput: (value: string) => void,
+  ): void {
+    const parsedPage = Number.parseInt(value, 10);
+    const nextPage = Number.isFinite(parsedPage)
+      ? Math.min(Math.max(parsedPage, 1), totalPages)
+      : 1;
+    setPage(nextPage);
+    setInput(String(nextPage));
+  }
+
+  async function goToAuditPage(page: number): Promise<void> {
+    const auditTotalPages = Math.max(1, Math.ceil(auditTotal / auditPageSize));
+    const nextPage = Math.min(Math.max(page, 1), auditTotalPages);
+    setAuditPageInput(String(nextPage));
+    await loadAuditLogs({ ...auditQuery, offset: (nextPage - 1) * auditPageSize });
+  }
+
+  async function commitAuditPageInput(): Promise<void> {
+    const auditTotalPages = Math.max(1, Math.ceil(auditTotal / auditPageSize));
+    const parsedPage = Number.parseInt(auditPageInput, 10);
+    const nextPage = Number.isFinite(parsedPage)
+      ? Math.min(Math.max(parsedPage, 1), auditTotalPages)
+      : 1;
+    await goToAuditPage(nextPage);
   }
 
   async function saveAgentCoreConfig(): Promise<void> {
@@ -1189,6 +1366,41 @@ function App(): ReactElement {
     await refreshAuditLogs();
   }
 
+  async function syncModelAgentBindings(profile: ModelProfileConfig): Promise<ClientConfigState> {
+    if (!draftConfig) {
+      throw new Error('Missing draft config');
+    }
+    let nextConfigState = await window.windowsClient.saveModelConfig({
+      ...draftConfig.model,
+      defaultModelId: draftConfig.model.defaultModelId ?? profile.id,
+      models: draftConfig.model.models.some((model) => model.id === profile.id)
+        ? draftConfig.model.models.map((model) => (model.id === profile.id ? profile : model))
+        : [...draftConfig.model.models, profile],
+    });
+
+    const targetAgentIds = new Set(profile.usedByAgentIds);
+    for (const agent of nextConfigState.config.agents) {
+      const shouldUseModel = targetAgentIds.has(agent.id);
+      const hasModel = agent.modelIds.includes(profile.id);
+      if (shouldUseModel === hasModel) {
+        continue;
+      }
+      const nextModelIds = shouldUseModel
+        ? Array.from(new Set([...agent.modelIds, profile.id]))
+        : agent.modelIds.filter((id) => id !== profile.id);
+      const nextAgent: AgentConfig = {
+        ...agent,
+        modelIds: nextModelIds,
+        defaultModelId:
+          agent.defaultModelId && nextModelIds.includes(agent.defaultModelId)
+            ? agent.defaultModelId
+            : (nextModelIds[0] ?? null),
+      };
+      nextConfigState = await window.windowsClient.saveAgentConfig(nextAgent);
+    }
+    return nextConfigState;
+  }
+
   async function saveModelProfile(profile: ModelProfileConfig): Promise<void> {
     if (!draftConfig) {
       return;
@@ -1235,18 +1447,9 @@ function App(): ReactElement {
         text: '模型需要先测试联通成功，才能启用。当前已保存为未启用状态。',
       });
     }
-    const exists = draftConfig.model.models.some((model) => model.id === normalizedProfile.id);
-    const models = exists
-      ? draftConfig.model.models.map((model) => (model.id === normalizedProfile.id ? normalizedProfile : model))
-      : [...draftConfig.model.models, normalizedProfile];
-    const nextModelConfig = {
-      ...draftConfig.model,
-      defaultModelId: draftConfig.model.defaultModelId ?? normalizedProfile.id,
-      models,
-    };
 
     setStatusText(`正在保存模型：${normalizedProfile.displayName}`);
-    const nextConfig = await window.windowsClient.saveModelConfig(nextModelConfig);
+    const nextConfig = await syncModelAgentBindings(normalizedProfile);
     setConfigState(nextConfig);
     setDraftConfig(nextConfig.config);
     setModelEditor(null);
@@ -1512,6 +1715,20 @@ function App(): ReactElement {
       return {
         ...model,
         input: nextInput.length ? nextInput : ['text'],
+      };
+    });
+  }
+
+  function toggleModelAgent(agentId: string, checked: boolean): void {
+    setModelEditor((model) => {
+      if (!model) {
+        return model;
+      }
+      return {
+        ...model,
+        usedByAgentIds: checked
+          ? Array.from(new Set([...model.usedByAgentIds, agentId]))
+          : model.usedByAgentIds.filter((id) => id !== agentId),
       };
     });
   }
@@ -1879,7 +2096,7 @@ function App(): ReactElement {
     });
   }
 
-  const canSend = Boolean(draftMessage.trim() && selectedAgent && !sessionStarting);
+  const canSend = Boolean(draftMessage.trim() && selectedAgent && !sessionStarting && !selectedConversation.archivedAt);
   const selectedAgentModel = draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId);
   const selectedAgentCapabilities = draftConfig?.capabilities.filter((capability) =>
     selectedAgent?.capabilityIds.includes(capability.id),
@@ -1930,6 +2147,9 @@ function App(): ReactElement {
         : ''
     : '';
   const modelSuggestions = modelEditorPreset?.models ?? [];
+  const capabilityEditorExists = Boolean(
+    capabilityEditor && draftConfig?.capabilities.some((capability) => capability.id === capabilityEditor.id),
+  );
   const activeSearchScopeName = searchAgentId
     ? searchableAgentOptions.find((agent) => agent.id === searchAgentId)?.name ?? '当前智能体'
     : '全部智能体';
@@ -1979,18 +2199,47 @@ function App(): ReactElement {
             <p className="sidebar-empty">当前智能体暂无历史会话</p>
           ) : (
             selectedAgentConversations.map((conversation) => (
-              <button
-                type="button"
+              <div
                 className={`sidebar-thread ${conversation.id === selectedConversation.id ? 'active' : ''}`}
                 key={conversation.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   selectConversation(conversation.id);
                   setActiveSection('workbench');
                 }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectConversation(conversation.id);
+                    setActiveSection('workbench');
+                  }
+                }}
               >
                 <span>{getConversationDisplayTitle(conversation, selectedAgent)}</span>
                 <small>{formatLocalTimestamp(conversation.updatedAt)}</small>
-              </button>
+                <button
+                  type="button"
+                  className="sidebar-thread-menu-button"
+                  aria-label="会话操作"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setConversationMenuId((current) => (current === conversation.id ? null : conversation.id));
+                  }}
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+                {conversationMenuId === conversation.id && (
+                  <div className="sidebar-thread-menu" onClick={(event) => event.stopPropagation()}>
+                    <button type="button" onClick={() => openRenameConversation(conversation)}>
+                      重命名
+                    </button>
+                    <button type="button" onClick={() => archiveConversation(conversation)}>
+                      归档
+                    </button>
+                  </div>
+                )}
+              </div>
             ))
           )}
         </div>
@@ -2631,6 +2880,13 @@ function App(): ReactElement {
                 </button>
                 <button
                   type="button"
+                  className={activeConfigTab === 'archived' ? 'active' : ''}
+                  onClick={() => setActiveConfigTab('archived')}
+                >
+                  已归档对话
+                </button>
+                <button
+                  type="button"
                   className={activeConfigTab === 'core' ? 'active' : ''}
                   onClick={() => setActiveConfigTab('core')}
                 >
@@ -2740,8 +2996,46 @@ function App(): ReactElement {
               </section>
               )}
 
+              {activeConfigTab === 'archived' && (
+              <section className="config-block list-page">
+                <div className="section-title-row">
+                  <div>
+                    <strong>已归档对话</strong>
+                    <span>按归档时间展示来自不同智能体的会话，详情复用当前对话页。</span>
+                  </div>
+                </div>
+                <div className="list-page-body">
+                  <div className="capability-table">
+                    {archivedConversations.length === 0 ? (
+                      <p className="empty-state">暂无已归档对话。</p>
+                    ) : (
+                      archivedConversations.map(({ agentId, agentName, conversation }) => (
+                        <div className="capability-row archived-conversation-row" key={`${agentId}-${conversation.id}`}>
+                          <div>
+                            <strong>{getConversationDisplayTitle(conversation, null)}</strong>
+                            <span>{agentName}</span>
+                          </div>
+                          <small>{formatLocalTimestamp(conversation.archivedAt ?? conversation.updatedAt)}</small>
+                          <small>{conversation.transcript.length} 条消息</small>
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="secondary-button compact-button"
+                              onClick={() => openArchivedConversation(agentId, conversation.id)}
+                            >
+                              查看
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </section>
+              )}
+
               {activeConfigTab === 'models' && (
-              <section className="config-block">
+              <section className="config-block list-page">
                 <div className="section-title-row">
                   <div>
                     <strong>模型 / Provider</strong>
@@ -2842,7 +3136,7 @@ function App(): ReactElement {
                   {filteredModels.length === 0 ? (
                     <p className="empty-state">暂无匹配模型。可以新增官方 Provider、本地模型或自定义模型。</p>
                   ) : (
-                    filteredModels.map((model) => (
+                    pagedModels.map((model) => (
                       <div className="model-row" key={model.id}>
                         <div>
                           <strong>{model.displayName}</strong>
@@ -2867,7 +3161,7 @@ function App(): ReactElement {
                             className="quiet-button compact-button"
                             onClick={() => {
                               setModelEditorNotice(null);
-                              setModelEditor(model);
+                              setModelEditor(hydrateModelAgentUsage(model, draftConfig.agents));
                             }}
                           >
                             编辑
@@ -2900,7 +3194,27 @@ function App(): ReactElement {
                     ))
                   )}
                 </div>
-                <div className="list-page-footer">
+                <PaginationBar
+                  summary={`第 ${modelPage} / ${modelTotalPages} 页，共 ${filteredModels.length} 条`}
+                  page={modelPage}
+                  totalPages={modelTotalPages}
+                  pageInput={modelPageInput}
+                  onPageInputChange={setModelPageInput}
+                  onPageInputCommit={() =>
+                    commitLocalPageInput(modelPageInput, modelTotalPages, setModelPage, setModelPageInput)
+                  }
+                  onPrevious={() => {
+                    const nextPage = Math.max(1, modelPage - 1);
+                    setModelPage(nextPage);
+                    setModelPageInput(String(nextPage));
+                  }}
+                  onNext={() => {
+                    const nextPage = Math.min(modelTotalPages, modelPage + 1);
+                    setModelPage(nextPage);
+                    setModelPageInput(String(nextPage));
+                  }}
+                />
+                <div className="list-page-footer legacy-list-footer">
                   <span>已显示 {filteredModels.length} / {draftConfig.model.models.length} 个模型</span>
                   <button
                     type="button"
@@ -2997,7 +3311,7 @@ function App(): ReactElement {
                   {filteredCapabilities.length === 0 ? (
                     <p className="empty-state">暂无匹配能力。可以新增 HTTP API、本地命令、MCP 工具或 Skill。</p>
                   ) : (
-                    filteredCapabilities.map((capability) => (
+                    pagedCapabilities.map((capability) => (
                       <div className="capability-row" key={capability.id}>
                         <div>
                           <strong>{capability.name}</strong>
@@ -3063,7 +3377,32 @@ function App(): ReactElement {
                   ))}
                 </div>
                 </div>
-                <div className="list-page-footer">
+                <PaginationBar
+                  summary={`第 ${capabilityPage} / ${capabilityTotalPages} 页，共 ${filteredCapabilities.length} 条`}
+                  page={capabilityPage}
+                  totalPages={capabilityTotalPages}
+                  pageInput={capabilityPageInput}
+                  onPageInputChange={setCapabilityPageInput}
+                  onPageInputCommit={() =>
+                    commitLocalPageInput(
+                      capabilityPageInput,
+                      capabilityTotalPages,
+                      setCapabilityPage,
+                      setCapabilityPageInput,
+                    )
+                  }
+                  onPrevious={() => {
+                    const nextPage = Math.max(1, capabilityPage - 1);
+                    setCapabilityPage(nextPage);
+                    setCapabilityPageInput(String(nextPage));
+                  }}
+                  onNext={() => {
+                    const nextPage = Math.min(capabilityTotalPages, capabilityPage + 1);
+                    setCapabilityPage(nextPage);
+                    setCapabilityPageInput(String(nextPage));
+                  }}
+                />
+                <div className="list-page-footer legacy-list-footer">
                   <span>已显示 {filteredCapabilities.length} / {draftConfig.capabilities.length} 个能力</span>
                   <button type="button" className="primary-action-button compact-button" onClick={() => setCapabilityEditor(createCapabilityConfig())}>
                     <Plus size={16} />
@@ -3215,14 +3554,61 @@ function App(): ReactElement {
               )}
             </div>
             <PaginationBar
-              summary={`已显示 ${auditEntries.length} / ${auditTotal} 条`}
-              hasMore={auditHasMore}
-              nextLabel="加载更多"
-              onNext={loadMoreAuditLogs}
+              summary={`第 ${Math.floor((auditQuery.offset ?? 0) / auditPageSize) + 1} / ${Math.max(1, Math.ceil(auditTotal / auditPageSize))} 页，共 ${auditTotal} 条`}
+              page={Math.floor((auditQuery.offset ?? 0) / auditPageSize) + 1}
+              totalPages={Math.max(1, Math.ceil(auditTotal / auditPageSize))}
+              pageInput={auditPageInput}
+              onPageInputChange={setAuditPageInput}
+              onPageInputCommit={() => {
+                void commitAuditPageInput();
+              }}
+              onPrevious={() => {
+                void goToAuditPage(Math.floor((auditQuery.offset ?? 0) / auditPageSize));
+              }}
+              onNext={() => {
+                void goToAuditPage(Math.floor((auditQuery.offset ?? 0) / auditPageSize) + 2);
+              }}
             />
           </article>
         )}
       </section>
+
+      {renamingConversation && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-panel rename-conversation-modal" role="dialog" aria-modal="true" aria-label="重命名会话">
+            <div className="panel-heading with-action">
+              <div>
+                <Settings size={20} />
+                <h3>重命名会话</h3>
+              </div>
+              <button type="button" className="modal-close-button" onClick={() => setRenamingConversation(null)}>
+                关闭
+              </button>
+            </div>
+            <div className="model-form-layout">
+              <label className="wide-field">
+                <span>会话名称</span>
+                <input
+                  value={renameConversationTitle}
+                  maxLength={maxConversationTitleLength}
+                  onChange={(event) => setRenameConversationTitle(event.target.value)}
+                  autoFocus
+                />
+                <small className="field-hint">最多 {maxConversationTitleLength} 个字符。</small>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="quiet-button" onClick={() => setRenamingConversation(null)}>
+                取消
+              </button>
+              <button type="button" onClick={saveConversationRename}>
+                <Save size={16} />
+                <span>保存</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {expandedAuditEntry && (
         <div className="modal-backdrop" role="presentation">
@@ -3262,7 +3648,7 @@ function App(): ReactElement {
                 <h3>{agentEditor.name ? `编辑智能体：${agentEditor.name}` : '新增智能体'}</h3>
               </div>
               <button type="button" className="modal-close-button" onClick={() => setAgentEditor(null)} aria-label="关闭">
-                ×
+                关闭
               </button>
             </div>
             <div className="model-form-layout">
@@ -3576,7 +3962,7 @@ function App(): ReactElement {
                 <h3>{modelEditor.displayName ? `编辑模型：${modelEditor.displayName}` : '新增模型'}</h3>
               </div>
               <button type="button" className="modal-close-button" onClick={() => setModelEditor(null)} aria-label="关闭">
-                ×
+                关闭
               </button>
             </div>
             {modelEditorNotice && (
@@ -3749,6 +4135,24 @@ function App(): ReactElement {
                 <span>支持思考 / Reasoning</span>
               </label>
 
+              <div className="wide-field checklist-box">
+                <strong>可用智能体</strong>
+                {(draftConfig?.agents ?? []).length === 0 ? (
+                  <p className="empty-state">暂无智能体。</p>
+                ) : (
+                  (draftConfig?.agents ?? []).map((agent) => (
+                    <label className="checkbox-row" key={agent.id}>
+                      <input
+                        type="checkbox"
+                        checked={modelEditor.usedByAgentIds.includes(agent.id)}
+                        onChange={(event) => toggleModelAgent(agent.id, event.target.checked)}
+                      />
+                      <span>{agent.name || '未命名智能体'}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+
               <div className="form-section-heading wide-field">
                 <strong>价格信息</strong>
                 <span>用于后续统计 token 成本；不清楚可以先保持 0。</span>
@@ -3806,7 +4210,7 @@ function App(): ReactElement {
             <div className="panel-heading with-action">
               <div>
                 <ShieldCheck size={20} />
-                <h3>{capabilityEditor.name ? `编辑能力：${capabilityEditor.name}` : '新增能力'}</h3>
+                <h3>{capabilityEditorExists ? `编辑能力：${capabilityEditor.name}` : '新增能力'}</h3>
               </div>
               <button type="button" className="quiet-button compact-button" onClick={() => setCapabilityEditor(null)}>
                 关闭
@@ -4202,10 +4606,12 @@ function App(): ReactElement {
             </div>
 
             <div className="modal-actions">
-              <button type="button" className="quiet-button" onClick={() => deleteCapabilityConfig(capabilityEditor.id)}>
-                <Trash2 size={16} />
-                <span>删除</span>
-              </button>
+              {capabilityEditorExists && (
+                <button type="button" className="quiet-button" onClick={() => deleteCapabilityConfig(capabilityEditor.id)}>
+                  <Trash2 size={16} />
+                  <span>删除</span>
+                </button>
+              )}
               <button type="button" className="secondary-button" onClick={() => testCapabilityConnection(capabilityEditor)}>
                 测试联通
               </button>
