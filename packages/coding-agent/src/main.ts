@@ -216,6 +216,7 @@ async function createSessionManager(
 	cwd: string,
 	sessionDir: string | undefined,
 	settingsManager: SettingsManager,
+	continueByDefault: boolean,
 ): Promise<SessionManager> {
 	if (parsed.noSession) {
 		return SessionManager.inMemory();
@@ -281,7 +282,7 @@ async function createSessionManager(
 		return SessionManager.continueRecent(cwd, sessionDir);
 	}
 
-	return SessionManager.create(cwd, sessionDir);
+	return continueByDefault ? SessionManager.continueRecent(cwd, sessionDir) : SessionManager.create(cwd, sessionDir);
 }
 
 function buildSessionOptions(
@@ -498,7 +499,9 @@ export async function main(args: string[], options?: MainOptions) {
 		parsed.sessionDir ??
 		(envSessionDir ? expandTildePath(envSessionDir) : undefined) ??
 		startupSettingsManager.getSessionDir();
-	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager);
+	const continueByDefault =
+		appMode === "interactive" && parsed.messages.length === 0 && parsed.fileArgs.length === 0 && !parsed.export;
+	let sessionManager = await createSessionManager(parsed, cwd, sessionDir, startupSettingsManager, continueByDefault);
 	const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);
 	if (missingSessionCwdIssue) {
 		if (appMode === "interactive") {
