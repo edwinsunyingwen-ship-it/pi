@@ -2689,11 +2689,15 @@ function App(): ReactElement {
 
               <section className="chat-workspace">
                 <div className="chat-header">
-                  <div>
+                  <div className="chat-header-main">
                     <strong>{selectedAgent?.name ?? '请选择主智能体'}</strong>
                     <span>
                       {activeWorkspace.path ? `工作区：${activeWorkspace.path}` : '尚未选择工作区'}
                     </span>
+                  </div>
+                  <div className={`agent-runtime-state ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`}>
+                    <span className={`status-dot ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`} />
+                    <strong>{sessionStarting ? '准备中' : sessionReady ? '已就绪' : '未就绪'}</strong>
                   </div>
                 </div>
 
@@ -2727,63 +2731,7 @@ function App(): ReactElement {
                   )}
                 </div>
 
-                <div className="workbench-actions">
-                  <div className={`agent-runtime-state ${sessionReady ? 'online' : 'offline'}`}>
-                    <span className={`status-dot ${sessionReady ? 'online' : 'offline'}`} />
-                    <strong>{sessionStarting ? '正在准备' : sessionReady ? '智能体已就绪' : '智能体未就绪'}</strong>
-                  </div>
-                  {!sessionReady && (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => startSession({ force: true })}
-                      disabled={!selectedAgent || sessionStarting}
-                    >
-                      <Bot size={18} />
-                      <span>{sessionStarting ? '准备中' : '重试启动'}</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="quiet-button"
-                    disabled={!sessionReady}
-                    onClick={stopSession}
-                  >
-                    <Square size={16} />
-                    <span>停止</span>
-                  </button>
-                </div>
-
                 <div className="composer workbench-composer">
-                  <div className="composer-tools">
-                    <button type="button" className="quiet-button compact-button" onClick={chooseWorkspace}>
-                      <FolderOpen size={16} />
-                      <span>工作区</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="quiet-button compact-button"
-                      onClick={() => setContextPanelOpen(true)}
-                    >
-                      <FileText size={16} />
-                      <span>文件</span>
-                    </button>
-                  </div>
-                  {selectedAgentTaskTemplates.length > 0 && (
-                    <select
-                      className="task-template-select"
-                      value=""
-                      onChange={(event) => applyTaskTemplate(event.target.value)}
-                      aria-label="选择常规任务"
-                    >
-                      <option value="">选择常规任务</option>
-                      {selectedAgentTaskTemplates.map((template) => (
-                        <option value={template.id} key={template.id}>
-                          {template.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
                   <textarea
                     value={draftMessage}
                     onChange={(event) => {
@@ -2793,10 +2741,54 @@ function App(): ReactElement {
                     placeholder="向当前智能体发送消息"
                     rows={3}
                   />
-                  <button type="button" disabled={!canSend} onClick={sendMessage}>
-                    <Send size={18} />
-                    <span>发送</span>
-                  </button>
+                  <div className="composer-bottom-bar">
+                    <div className="composer-bottom-left">
+                      <button type="button" className="composer-tool-button" onClick={chooseWorkspace}>
+                        <FolderOpen size={16} />
+                        <span>工作区</span>
+                      </button>
+                      <button type="button" className="composer-tool-button" onClick={() => setContextPanelOpen(true)}>
+                        <FileText size={16} />
+                        <span>文件</span>
+                      </button>
+                      {selectedAgentTaskTemplates.length > 0 && (
+                        <select
+                          className="task-template-select"
+                          value=""
+                          onChange={(event) => applyTaskTemplate(event.target.value)}
+                          aria-label="选择常规任务"
+                        >
+                          <option value="">选择常规任务</option>
+                          {selectedAgentTaskTemplates.map((template) => (
+                            <option value={template.id} key={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <div className="composer-bottom-right">
+                      {!sessionReady && (
+                        <button
+                          type="button"
+                          className="composer-tool-button"
+                          onClick={() => startSession({ force: true })}
+                          disabled={!selectedAgent || sessionStarting}
+                        >
+                          <Bot size={16} />
+                          <span>{sessionStarting ? '准备中' : '重试'}</span>
+                        </button>
+                      )}
+                      <button type="button" className="composer-tool-button" disabled={!sessionReady} onClick={stopSession}>
+                        <Square size={16} />
+                        <span>停止</span>
+                      </button>
+                      <button type="button" className="composer-send-button" disabled={!canSend} onClick={sendMessage}>
+                        <Send size={18} />
+                        <span>发送</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </section>
 
