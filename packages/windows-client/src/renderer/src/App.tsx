@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactElement } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { marked } from 'marked';
+import type { Token, Tokens } from 'marked';
 import {
   Bot,
   CheckCircle2,
+  Copy,
   FileText,
   FolderOpen,
   Laptop,
@@ -576,6 +579,208 @@ function renderHighlightedText(text: string, query: string): ReactElement {
       )}
     </>
   );
+}
+
+function isSafeMarkdownUrl(value: string): boolean {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return false;
+  }
+  if (trimmedValue.startsWith('#') || trimmedValue.startsWith('/')) {
+    return true;
+  }
+  try {
+    const url = new URL(trimmedValue);
+    return ['http:', 'https:', 'mailto:', 'file:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function getMarkdownText(token: Token): string {
+  if ('text' in token && typeof token.text === 'string') {
+    return token.text;
+  }
+  if ('raw' in token && typeof token.raw === 'string') {
+    return token.raw;
+  }
+  return '';
+}
+
+function renderMarkdownText(text: string, key: string, searchQuery?: string): ReactNode {
+  if (!searchQuery) {
+    return text;
+  }
+  return <span key={key}>{renderHighlightedText(text, searchQuery)}</span>;
+}
+
+function getTextAlign(align: Tokens.TableCell['align']): CSSProperties | undefined {
+  return align ? { textAlign: align } : undefined;
+}
+
+function renderMarkdownHeading(token: Tokens.Heading, key: string, searchQuery?: string): ReactElement {
+  const children = renderMarkdownInlineTokens(token.tokens, key, searchQuery);
+  switch (Math.min(Math.max(token.depth, 1), 6)) {
+    case 1:
+      return <h1 key={key}>{children}</h1>;
+    case 2:
+      return <h2 key={key}>{children}</h2>;
+    case 3:
+      return <h3 key={key}>{children}</h3>;
+    case 4:
+      return <h4 key={key}>{children}</h4>;
+    case 5:
+      return <h5 key={key}>{children}</h5>;
+    default:
+      return <h6 key={key}>{children}</h6>;
+  }
+}
+
+function MarkdownCodeBlock({ code, language }: { code: string; language?: string }): ReactElement {
+  const [copied, setCopied] = useState(false);
+  const copyCode = async (): Promise<void> => {
+    await navigator.clipboard?.writeText(code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  };
+
+  return (
+    <div className="markdown-code-block">
+      <div className="markdown-code-toolbar">
+        <span>{language || 'text'}</span>
+        <button className="markdown-copy-button" type="button" onClick={copyCode}>
+          <Copy size={14} />
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </div>
+      <pre>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function renderMarkdownInlineTokens(tokens: Token[] | undefined, keyPrefix: string, searchQuery?: string): ReactNode[] {
+  if (!tokens || tokens.length === 0) {
+    return [];
+  }
+
+  return tokens.flatMap((token, index): ReactNode[] => {
+    const key = `${keyPrefix}-${index}`;
+    switch (token.type) {
+      case 'text':
+      case 'escape':
+        return [renderMarkdownText(getMarkdownText(token), key, searchQuery)];
+      case 'strong':
+        return [<strong key={key}>{renderMarkdownInlineTokens(token.tokens, key, searchQuery)}</strong>];
+      case 'em':
+        return [<em key={key}>{renderMarkdownInlineTokens(token.tokens, key, searchQuery)}</em>];
+      case 'del':
+        return [<del key={key}>{renderMarkdownInlineTokens(token.tokens, key, searchQuery)}</del>];
+      case 'codespan':
+        return [<code key={key}>{token.text}</code>];
+      case 'br':
+        return [<br key={key} />];
+      case 'link': {
+        if (!isSafeMarkdownUrl(token.href)) {
+          return [renderMarkdownText(token.text, key, searchQuery)];
+        }
+        return [
+          <a href={token.href} key={key} rel="noreferrer" target="_blank" title={token.title ?? undefined}>
+            {renderMarkdownInlineTokens(token.tokens, key, searchQuery)}
+          </a>,
+        ];
+      }
+      case 'image': {
+        if (!isSafeMarkdownUrl(token.href)) {
+          return [renderMarkdownText(token.text, key, searchQuery)];
+        }
+        return [<img alt={token.text} className="markdown-image" key={key} src={token.href} title={token.title ?? undefined} />];
+      }
+      case 'html':
+        return [renderMarkdownText(token.raw, key, searchQuery)];
+      default:
+        return [renderMarkdownText(getMarkdownText(token), key, searchQuery)];
+    }
+  });
+}
+
+function renderMarkdownBlocks(tokens: Token[], searchQuery?: string): ReactNode[] {
+  return tokens.flatMap((token, index): ReactNode[] => {
+    const key = `markdown-block-${index}`;
+    switch (token.type) {
+      case 'space':
+        return [];
+      case 'paragraph': {
+        const paragraph = token as Tokens.Paragraph;
+        return [<p key={key}>{renderMarkdownInlineTokens(paragraph.tokens, key, searchQuery)}</p>];
+      }
+      case 'heading':
+        return [renderMarkdownHeading(token as Tokens.Heading, key, searchQuery)];
+      case 'blockquote': {
+        const blockquote = token as Tokens.Blockquote;
+        return [<blockquote key={key}>{renderMarkdownBlocks(blockquote.tokens, searchQuery)}</blockquote>];
+      }
+      case 'list': {
+        const list = token as Tokens.List;
+        const ListTag = list.ordered ? 'ol' : 'ul';
+        return [
+          <ListTag key={key} start={list.ordered && list.start ? list.start : undefined}>
+            {list.items.map((item: Tokens.ListItem, itemIndex: number) => (
+              <li key={`${key}-${itemIndex}`}>
+                {item.task && <input checked={Boolean(item.checked)} disabled readOnly type="checkbox" />}
+                {renderMarkdownBlocks(item.tokens, searchQuery)}
+              </li>
+            ))}
+          </ListTag>,
+        ];
+      }
+      case 'code': {
+        const code = token as Tokens.Code;
+        return [<MarkdownCodeBlock code={code.text} key={key} language={code.lang} />];
+      }
+      case 'hr':
+        return [<hr key={key} />];
+      case 'table': {
+        const table = token as Tokens.Table;
+        return [
+          <div className="markdown-table-wrap" key={key}>
+            <table>
+              <thead>
+                <tr>
+                  {table.header.map((cell: Tokens.TableCell, cellIndex: number) => (
+                    <th key={`${key}-head-${cellIndex}`} style={getTextAlign(cell.align)}>
+                      {renderMarkdownInlineTokens(cell.tokens, `${key}-head-${cellIndex}`, searchQuery)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {table.rows.map((row: Tokens.TableCell[], rowIndex: number) => (
+                  <tr key={`${key}-row-${rowIndex}`}>
+                    {row.map((cell: Tokens.TableCell, cellIndex: number) => (
+                      <td key={`${key}-cell-${rowIndex}-${cellIndex}`} style={getTextAlign(cell.align)}>
+                        {renderMarkdownInlineTokens(cell.tokens, `${key}-cell-${rowIndex}-${cellIndex}`, searchQuery)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+        ];
+      }
+      case 'html':
+        return [<p key={key}>{token.raw}</p>];
+      default:
+        return [<p key={key}>{renderMarkdownText(getMarkdownText(token), key, searchQuery)}</p>];
+    }
+  });
+}
+
+function MarkdownMessage({ text, searchQuery }: { text: string; searchQuery?: string }): ReactElement {
+  const tokens = useMemo(() => marked.lexer(text, { breaks: true, gfm: true }), [text]);
+  return <div className="markdown-message">{renderMarkdownBlocks(tokens, searchQuery)}</div>;
 }
 
 function createDefaultAuditQuery(): AuditLogQuery {
@@ -2515,9 +2720,7 @@ function App(): ReactElement {
                           }}
                         >
                           <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
-                          <span>
-                            {isSearchTarget ? renderHighlightedText(item.text, targetQuery) : item.text}
-                          </span>
+                          <MarkdownMessage text={item.text} searchQuery={isSearchTarget ? targetQuery : undefined} />
                         </div>
                       );
                     })
@@ -2817,7 +3020,7 @@ function App(): ReactElement {
                   transcript.map((item) => (
                     <div className={`message-bubble ${item.role}`} key={`${item.createdAt}-${item.role}`}>
                       <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
-                      <span>{item.text}</span>
+                      <MarkdownMessage text={item.text} />
                     </div>
                   ))
                 )}
