@@ -42,6 +42,14 @@ type RpcEvent = {
 	result?: unknown;
 	partialResult?: unknown;
 	isError?: boolean;
+	toolResults?: Array<{
+		role?: string;
+		content?: unknown;
+		toolCallId?: string;
+		toolName?: string;
+		stopReason?: string;
+		errorMessage?: string;
+	}>;
 	messages?: Array<{
 		role?: string;
 		content?: unknown;
@@ -1258,6 +1266,16 @@ export default function (pi) {
 
 			if (event.type === "agent_end") {
 				this.extractToolCallsFromMessages(event.messages ?? [], ensureCall);
+				continue;
+			}
+
+			if (event.type === "turn_end") {
+				this.extractToolCallsFromMessages(
+					[event.message, ...(event.toolResults ?? [])].filter(
+						(message): message is NonNullable<RpcEvent["message"]> => Boolean(message),
+					),
+					ensureCall,
+				);
 			}
 		}
 
@@ -1271,7 +1289,7 @@ export default function (pi) {
 		for (const message of messages) {
 			if (message.role === "assistant" && Array.isArray(message.content)) {
 				for (const item of message.content) {
-					if (!this.isRecord(item) || item.type !== "toolCall") {
+					if (!this.isRecord(item) || (item.type !== "toolCall" && item.type !== "tool_call")) {
 						continue;
 					}
 					const id = this.asString(item.id ?? item.toolCallId);
@@ -1294,6 +1312,17 @@ export default function (pi) {
 				const call = ensureCall(id, name);
 				call.outputSummary = call.outputSummary ?? this.summarizeUnknown(message.content);
 				call.status = "success";
+			}
+
+			if (message.role === "assistant" && this.isRecord(message.content)) {
+				const id = this.asString(message.content.id ?? message.content.toolCallId);
+				const name = this.asString(message.content.name ?? message.content.toolName);
+				if (id && name) {
+					const call = ensureCall(id, name);
+					call.inputSummary =
+						call.inputSummary ??
+						this.summarizeUnknown(message.content.arguments ?? message.content.args ?? message.content.input);
+				}
 			}
 		}
 	}

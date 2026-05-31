@@ -2955,7 +2955,7 @@ function App(): ReactElement {
         )}
 
         {activeSection === 'logs' && (
-          <article className="panel wide-panel">
+          <article className="panel wide-panel audit-panel">
             <div className="panel-heading with-action">
               <div>
                 <ListChecks size={20} />

@@ -3224,8 +3224,24 @@ select:focus {
   padding: 16px;
 }
 
+.app-shell > .dashboard-grid > .audit-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.app-shell > .dashboard-grid > .audit-panel > .subtle-text,
+.app-shell > .dashboard-grid > .audit-panel > .audit-filters,
+.app-shell > .dashboard-grid > .audit-panel > .audit-pagination,
+.app-shell > .dashboard-grid > .audit-panel > .panel-heading {
+  flex: 0 0 auto;
+}
+
 .app-shell > .dashboard-grid .audit-list {
+  flex: 1 1 auto;
   gap: 0;
+  min-height: 0;
   max-height: none;
   overflow: hidden auto;
 }
