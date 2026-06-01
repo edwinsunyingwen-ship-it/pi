@@ -3670,10 +3670,40 @@ select:focus {
   background: #fbfaf7;
   border-bottom: 1px solid #e5ded5;
   display: flex;
+  gap: 6px;
   grid-column: 1 / -1;
   grid-row: 1;
   min-width: 0;
+  padding: 0 140px 0 6px;
+  -webkit-app-region: drag;
+}
+
+.app-menu {
+  align-items: center;
+  display: flex;
+  gap: 1px;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.app-menu button {
+  background: transparent;
+  border-radius: 4px;
+  color: #202124;
+  font-size: 0.9rem;
+  font-weight: 500;
+  min-height: 28px;
   padding: 0 8px;
+}
+
+.app-menu button:hover {
+  background: #ece8e1;
+  color: #202124;
+}
+
+.app-chrome .sidebar-toggle-button {
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
 }
 
 .app-shell > .top-bar,

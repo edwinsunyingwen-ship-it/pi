@@ -38,7 +38,14 @@ function createWindow(): void {
 		minWidth: 980,
 		minHeight: 640,
 		title: "Pi 智能体客户端",
+		autoHideMenuBar: true,
 		backgroundColor: "#f6f5f2",
+		titleBarOverlay: {
+			color: "#fbfaf7",
+			height: 32,
+			symbolColor: "#202124",
+		},
+		titleBarStyle: "hidden",
 		webPreferences: {
 			preload: join(mainDir, "../preload/index.mjs"),
 			sandbox: false,

@@ -2457,6 +2457,13 @@ function App(): ReactElement {
         >
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
+        <nav className="app-menu" aria-label="应用菜单">
+          <button type="button">File</button>
+          <button type="button">Edit</button>
+          <button type="button">View</button>
+          <button type="button">Window</button>
+          <button type="button">Help</button>
+        </nav>
       </header>
       <aside className="global-sidebar" aria-label="司南导航">
         <div className="sidebar-actions">
