@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, ReactElement, ReactNode } from 'react';
+import type { CSSProperties, ChangeEvent, ClipboardEvent, KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { marked } from 'marked';
 import type { Token, Tokens } from 'marked';
@@ -100,6 +100,55 @@ const capabilityPageSize = 20;
 const auditPageSize = 100;
 const maxConversationTitleLength = 60;
 const auditContentPreviewMaxLength = 120;
+const maxComposerAttachments = 20;
+const maxAttachmentTextLength = 30000;
+const textAttachmentExtensions = new Set([
+  'txt',
+  'md',
+  'markdown',
+  'json',
+  'jsonl',
+  'csv',
+  'tsv',
+  'xml',
+  'yaml',
+  'yml',
+  'html',
+  'css',
+  'js',
+  'jsx',
+  'ts',
+  'tsx',
+  'py',
+  'java',
+  'c',
+  'cpp',
+  'cs',
+  'go',
+  'rs',
+  'sh',
+  'ps1',
+  'sql',
+  'log',
+]);
+
+type AppMenuName = 'File' | 'Edit' | 'View' | 'Window' | 'Help';
+
+interface AppMenuItem {
+  label: string;
+  disabled?: boolean;
+  onSelect: () => void | Promise<void>;
+}
+
+interface ComposerAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  kind: 'image' | 'text' | 'file';
+  content: string;
+  truncated: boolean;
+}
 
 const auditActionLabels: Record<string, string> = {
   'select-workspace': '选择工作区',
@@ -344,6 +393,92 @@ function formatBytes(size: number): string {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getFileExtension(fileName: string): string {
+  const extension = fileName.split('.').pop();
+  return extension ? extension.toLowerCase() : '';
+}
+
+function isTextAttachment(file: File): boolean {
+  if (file.type.startsWith('text/')) {
+    return true;
+  }
+  return textAttachmentExtensions.has(getFileExtension(file.name));
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      resolve(typeof reader.result === 'string' ? reader.result : '');
+    });
+    reader.addEventListener('error', () => {
+      reject(reader.error ?? new Error(`Failed to read ${file.name}`));
+    });
+    reader.readAsDataURL(file);
+  });
+}
+
+async function createComposerAttachment(file: File): Promise<ComposerAttachment> {
+  if (file.type.startsWith('image/')) {
+    return {
+      id: crypto.randomUUID(),
+      name: file.name || 'pasted-image',
+      type: file.type || 'image/*',
+      size: file.size,
+      kind: 'image',
+      content: await readFileAsDataUrl(file),
+      truncated: false,
+    };
+  }
+
+  if (isTextAttachment(file)) {
+    const text = await file.text();
+    const truncated = text.length > maxAttachmentTextLength;
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: file.type || 'text/plain',
+      size: file.size,
+      kind: 'text',
+      content: truncated ? text.slice(0, maxAttachmentTextLength) : text,
+      truncated,
+    };
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    name: file.name,
+    type: file.type || 'application/octet-stream',
+    size: file.size,
+    kind: 'file',
+    content: '',
+    truncated: false,
+  };
+}
+
+function formatAttachmentForPrompt(attachment: ComposerAttachment, index: number): string {
+  const header = `附件 ${index + 1}: ${attachment.name} (${attachment.type || 'unknown'}, ${formatBytes(attachment.size)})`;
+  if (attachment.kind === 'image') {
+    return `${header}\n类型: image\n内容: ${attachment.content}`;
+  }
+  if (attachment.kind === 'text') {
+    return `${header}${attachment.truncated ? '\n说明: 内容过长，已截取前 30000 个字符。' : ''}\n内容:\n${attachment.content}`;
+  }
+  return `${header}\n说明: 已作为相关文件附加；当前版本无法直接提取该二进制文档正文，请根据文件名、类型和用户说明处理。`;
+}
+
+function buildMessageWithAttachments(message: string, attachments: ComposerAttachment[]): string {
+  if (attachments.length === 0) {
+    return message;
+  }
+  return [
+    message,
+    '',
+    '相关附件:',
+    attachments.map((attachment, index) => formatAttachmentForPrompt(attachment, index)).join('\n\n'),
+  ].join('\n');
 }
 
 function createCapabilityId(): string {
@@ -967,10 +1102,23 @@ function App(): ReactElement {
   const [renamingConversation, setRenamingConversation] = useState<AgentConversationState | null>(null);
   const [renameConversationTitle, setRenameConversationTitle] = useState('');
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [openAppMenu, setOpenAppMenu] = useState<AppMenuName | null>(null);
+  const [attachmentsByConversationId, setAttachmentsByConversationId] = useState<Record<string, ComposerAttachment[]>>({});
+  const composerFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     void refreshInitialState();
   }, []);
+
+  useEffect(() => {
+    if (!openAppMenu) {
+      return;
+    }
+
+    const closeMenu = (): void => setOpenAppMenu(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, [openAppMenu]);
 
   useEffect(() => {
     selectedAgentIdRef.current = selectedAgentId;
@@ -1164,6 +1312,7 @@ function App(): ReactElement {
   const draftMessage = selectedConversation.draftMessage;
   const sessionTitle = selectedConversation.title;
   const activeWorkspace = selectedConversation.workspace;
+  const composerAttachments = attachmentsByConversationId[selectedConversation.id] ?? [];
   const sessionReady = Boolean(session && session.state !== 'stopped');
   const sessionStarting = startingConversationId === selectedConversation.id;
   const selectedAgentConversations = selectedAgent
@@ -1409,7 +1558,9 @@ function App(): ReactElement {
     const nextConversations = Object.fromEntries(
       Object.entries(nextConversationStore.conversationsByAgentId).map(([agentId, conversations]) => [
         agentId,
-        conversations.map((conversation) => conversationFromStoredConversation(conversation)),
+        conversations
+          .map((conversation) => conversationFromStoredConversation(conversation))
+          .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt)),
       ]),
     );
     for (const agent of nextConfig.config.agents) {
@@ -1419,9 +1570,8 @@ function App(): ReactElement {
     }
     const nextActiveConversationIds = { ...nextConversationStore.activeConversationIdsByAgentId };
     for (const [agentId, conversations] of Object.entries(nextConversations)) {
-      if (!conversations.some((conversation) => conversation.id === nextActiveConversationIds[agentId])) {
-        nextActiveConversationIds[agentId] = conversations[0]?.id ?? '';
-      }
+      const latestConversation = conversations.find((conversation) => !conversation.archivedAt) ?? conversations[0];
+      nextActiveConversationIds[agentId] = latestConversation?.id ?? '';
     }
     agentConversationsRef.current = nextConversations;
     activeConversationIdsRef.current = nextActiveConversationIds;
@@ -2303,12 +2453,82 @@ function App(): ReactElement {
     await refreshAuditLogs();
   }
 
+  function clearCurrentConversationAttachments(conversationId = selectedConversation.id): void {
+    setAttachmentsByConversationId((current) => {
+      if (!current[conversationId]) {
+        return current;
+      }
+      const { [conversationId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+  }
+
+  async function addComposerFiles(fileList: FileList | File[]): Promise<void> {
+    const filesToAdd = Array.from(fileList);
+    if (filesToAdd.length === 0) {
+      return;
+    }
+
+    const availableSlots = maxComposerAttachments - composerAttachments.length;
+    if (availableSlots <= 0) {
+      setAgentNotice({ tone: 'error', text: `最多只能上传 ${maxComposerAttachments} 个文件。` });
+      return;
+    }
+
+    const acceptedFiles = filesToAdd.slice(0, availableSlots);
+    const skippedCount = filesToAdd.length - acceptedFiles.length;
+    try {
+      const nextAttachments = await Promise.all(acceptedFiles.map((file) => createComposerAttachment(file)));
+      setAttachmentsByConversationId((current) => ({
+        ...current,
+        [selectedConversation.id]: [...(current[selectedConversation.id] ?? []), ...nextAttachments],
+      }));
+      setAgentNotice(
+        skippedCount > 0
+          ? {
+              tone: 'info',
+              text: `已添加 ${nextAttachments.length} 个文件；最多支持 ${maxComposerAttachments} 个，已忽略 ${skippedCount} 个。`,
+            }
+          : null,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? `读取附件失败：${error.message}` : '读取附件失败。';
+      setAgentNotice({ tone: 'error', text: message });
+    }
+  }
+
+  function removeComposerAttachment(attachmentId: string): void {
+    setAttachmentsByConversationId((current) => ({
+      ...current,
+      [selectedConversation.id]: (current[selectedConversation.id] ?? []).filter((attachment) => attachment.id !== attachmentId),
+    }));
+  }
+
+  function handleComposerFileInputChange(event: ChangeEvent<HTMLInputElement>): void {
+    const { files: selectedFiles } = event.target;
+    if (selectedFiles) {
+      void addComposerFiles(selectedFiles);
+    }
+    event.target.value = '';
+  }
+
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+    const pastedFiles = Array.from(event.clipboardData.files);
+    if (pastedFiles.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void addComposerFiles(pastedFiles);
+  }
+
   async function sendMessage(): Promise<void> {
     const message = draftMessage.trim();
     const messageAgent = selectedAgent;
-    if (!message || !messageAgent) {
+    if ((!message && composerAttachments.length === 0) || !messageAgent) {
       return;
     }
+    const attachmentsToSend = composerAttachments;
+    const outboundMessage = buildMessageWithAttachments(message, attachmentsToSend);
     let messageSession = session;
     const messageConversation = selectedConversation;
     if (!messageSession || messageSession.state === 'stopped') {
@@ -2318,7 +2538,7 @@ function App(): ReactElement {
       }
     }
 
-    const userItem: TranscriptItem = { role: 'user', text: message, createdAt: new Date().toISOString() };
+    const userItem: TranscriptItem = { role: 'user', text: outboundMessage, createdAt: new Date().toISOString() };
     const userTranscript = [...transcript, userItem];
     const nextTitle =
       transcript.length === 0 && isDefaultConversationTitle(messageConversation.title, messageAgent)
@@ -2330,9 +2550,10 @@ function App(): ReactElement {
       title: nextTitle,
       transcript: userTranscript,
     });
+    clearCurrentConversationAttachments(messageConversation.id);
     setStatusText('正在通过适配器发送消息');
 
-    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, message);
+    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage);
     const assistantTranscript = [
       ...userTranscript,
       { role: 'assistant' as const, text: result.responseText, createdAt: result.createdAt },
@@ -2383,7 +2604,12 @@ function App(): ReactElement {
     });
   }
 
-  const canSend = Boolean(draftMessage.trim() && selectedAgent && !sessionStarting && !selectedConversation.archivedAt);
+  const canSend = Boolean(
+    (draftMessage.trim() || composerAttachments.length > 0) &&
+      selectedAgent &&
+      !sessionStarting &&
+      !selectedConversation.archivedAt,
+  );
   const selectedAgentModel = draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId);
   const selectedAgentCapabilities = draftConfig?.capabilities.filter((capability) =>
     selectedAgent?.capabilityIds.includes(capability.id),
@@ -2444,6 +2670,44 @@ function App(): ReactElement {
   const activeSearchScopeName = searchAgentId
     ? searchableAgentOptions.find((agent) => agent.id === searchAgentId)?.name ?? '当前智能体'
     : '全部智能体';
+  const appMenus: Record<AppMenuName, AppMenuItem[]> = {
+    File: [
+      { label: '新建对话', disabled: !selectedAgent, onSelect: createNewConversation },
+      { label: '选择工作区', onSelect: chooseWorkspace },
+      {
+        label: '添加附件',
+        disabled: composerAttachments.length >= maxComposerAttachments,
+        onSelect: () => composerFileInputRef.current?.click(),
+      },
+    ],
+    Edit: [
+      {
+        label: '清空输入',
+        disabled: !draftMessage && composerAttachments.length === 0,
+        onSelect: () => {
+          saveCurrentConversation({ draftMessage: '' });
+          clearCurrentConversationAttachments();
+        },
+      },
+      { label: '清空附件', disabled: composerAttachments.length === 0, onSelect: () => clearCurrentConversationAttachments() },
+    ],
+    View: [
+      { label: '工作台', onSelect: () => setActiveSection('workbench') },
+      { label: '搜索', onSelect: () => setActiveSection('search') },
+      { label: '运行日志', onSelect: () => setActiveSection('logs') },
+      { label: contextPanelOpen ? '收起上下文' : '显示上下文', onSelect: () => setContextPanelOpen((open) => !open) },
+    ],
+    Window: [
+      { label: sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏', onSelect: () => setSidebarCollapsed((collapsed) => !collapsed) },
+      { label: '设置', onSelect: () => openSettings('models') },
+    ],
+    Help: [
+      {
+        label: environment ? `版本 ${environment.appVersion}` : '版本信息',
+        onSelect: () => setAgentNotice({ tone: 'info', text: environmentLine }),
+      },
+    ],
+  };
 
   return (
     <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -2457,12 +2721,42 @@ function App(): ReactElement {
         >
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
+        <div className="app-brand" aria-label="Aidocs Pro">
+          <span className="app-brand-mark">A</span>
+          <span className="app-brand-name">Aidocs Pro</span>
+        </div>
         <nav className="app-menu" aria-label="应用菜单">
-          <button type="button">File</button>
-          <button type="button">Edit</button>
-          <button type="button">View</button>
-          <button type="button">Window</button>
-          <button type="button">Help</button>
+          {(Object.keys(appMenus) as AppMenuName[]).map((menuName) => (
+            <div className="app-menu-item" key={menuName}>
+              <button
+                type="button"
+                className={openAppMenu === menuName ? 'active' : ''}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpenAppMenu((current) => (current === menuName ? null : menuName));
+                }}
+              >
+                {menuName}
+              </button>
+              {openAppMenu === menuName && (
+                <div className="app-menu-popover" onClick={(event) => event.stopPropagation()}>
+                  {appMenus[menuName].map((item) => (
+                    <button
+                      type="button"
+                      disabled={item.disabled}
+                      key={item.label}
+                      onClick={() => {
+                        setOpenAppMenu(null);
+                        void item.onSelect();
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </nav>
       </header>
       <aside className="global-sidebar" aria-label="司南导航">
@@ -2845,17 +3139,53 @@ function App(): ReactElement {
                 </div>
 
                 <div className="composer workbench-composer">
+                  <input
+                    ref={composerFileInputRef}
+                    className="composer-file-input"
+                    type="file"
+                    multiple
+                    onChange={handleComposerFileInputChange}
+                  />
                   <textarea
                     value={draftMessage}
                     onChange={(event) => {
                       saveCurrentConversation({ draftMessage: event.target.value });
                     }}
                     onKeyDown={handleComposerKeyDown}
+                    onPaste={handleComposerPaste}
                     placeholder="向当前智能体发送消息"
                     rows={3}
                   />
+                  {composerAttachments.length > 0 && (
+                    <div className="composer-attachments" aria-label="已添加附件">
+                      {composerAttachments.map((attachment) => (
+                        <span className="composer-attachment-chip" key={attachment.id} title={attachment.name}>
+                          <FileText size={14} />
+                          <span>{attachment.name}</span>
+                          <small>{formatBytes(attachment.size)}</small>
+                          <button
+                            type="button"
+                            onClick={() => removeComposerAttachment(attachment.id)}
+                            aria-label={`移除附件 ${attachment.name}`}
+                          >
+                            <X size={13} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="composer-bottom-bar">
                     <div className="composer-bottom-left">
+                      <button
+                        type="button"
+                        className="composer-tool-button icon-only-button"
+                        disabled={composerAttachments.length >= maxComposerAttachments}
+                        onClick={() => composerFileInputRef.current?.click()}
+                        aria-label="添加附件"
+                        title={`添加附件，最多 ${maxComposerAttachments} 个`}
+                      >
+                        <Plus size={18} />
+                      </button>
                       {selectedAgentTaskTemplates.length > 0 && (
                         <select
                           className="task-template-select"
@@ -3156,14 +3486,9 @@ function App(): ReactElement {
               >
                 <Info size={15} />
               </button>
-            </div>
-            <div className="settings-heading-actions">
-              <button type="button" className="quiet-button compact-button" onClick={closeSettings}>
+              <button type="button" className="quiet-button compact-button settings-back-button" onClick={closeSettings}>
                 <ArrowLeft size={16} />
                 <span>返回</span>
-              </button>
-              <button type="button" className="modal-close-button" onClick={closeSettings} aria-label="关闭">
-                <X size={18} />
               </button>
             </div>
           </div>
