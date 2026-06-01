@@ -3960,20 +3960,39 @@ select:focus {
 }
 
 .app-shell > .dashboard-grid .workbench-composer {
-  border-color: #dce7f5;
+  background: #f8fbff;
+  border: 2px solid #b7cff1;
   border-radius: 18px;
+  box-shadow:
+    0 0 0 3px rgb(37 99 235 / 5%),
+    0 14px 34px rgb(15 23 42 / 8%);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.app-shell > .dashboard-grid .workbench-composer:focus-within {
+  border-color: #7da7df;
+  box-shadow:
+    0 0 0 4px rgb(37 99 235 / 12%),
+    0 16px 38px rgb(15 23 42 / 10%);
 }
 
 .app-shell > .dashboard-grid .workbench-composer textarea {
+  background: #fffdfa;
+  border: 1px solid #d8e2ef;
+  border-radius: 12px;
   font-size: 1rem;
   line-height: 1.5;
   max-height: 126px;
-  min-height: 42px;
-  padding: 6px 4px;
+  min-height: 78px;
+  padding: 12px 14px;
+}
+
+.app-shell > .dashboard-grid .workbench-composer textarea:focus {
+  border-color: #8fb3e5;
+  outline: 0;
 }
 
 .app-shell > .dashboard-grid .composer-bottom-bar {
@@ -4078,6 +4097,7 @@ select:focus {
   align-items: center;
   display: flex;
   gap: 8px;
+  padding-right: 152px;
 }
 
 .hint-icon-button {
