@@ -4,11 +4,14 @@ import { createRoot } from 'react-dom/client';
 import { marked } from 'marked';
 import type { Token, Tokens } from 'marked';
 import {
+  ArrowLeft,
+  AlertTriangle,
   Bot,
   CheckCircle2,
   Copy,
   FileText,
   FolderOpen,
+  Info,
   Laptop,
   ListChecks,
   MoreHorizontal,
@@ -21,6 +24,7 @@ import {
   ShieldCheck,
   Square,
   Trash2,
+  X,
 } from 'lucide-react';
 import type {
   AgentConfig,
@@ -58,6 +62,15 @@ interface TranscriptItem {
 interface LocalNotice {
   tone: 'info' | 'success' | 'error';
   text: string;
+}
+
+interface ConfirmDialogState {
+  tone: 'default' | 'danger';
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  onConfirm: () => void | Promise<void>;
 }
 
 interface AgentConversationState {
@@ -178,7 +191,7 @@ const providerPresets: ProviderPreset[] = [
     setupMode: 'official-api-key',
     api: 'openai-completions',
     apiKeyEnv: 'DEEPSEEK_API_KEY',
-    baseUrl: '',
+    baseUrl: 'https://api.deepseek.com',
     note: 'OpenAI 兼容 Provider，适合 DeepSeek 官方 API。',
     models: ['deepseek-chat', 'deepseek-reasoner'],
     needsBaseUrl: false,
@@ -190,7 +203,7 @@ const providerPresets: ProviderPreset[] = [
     setupMode: 'official-api-key',
     api: 'openai-completions',
     apiKeyEnv: 'MOONSHOT_API_KEY',
-    baseUrl: '',
+    baseUrl: 'https://api.moonshot.cn/v1',
     note: 'Pi 内置 Provider，适合 Moonshot / Kimi 官方 API。',
     models: ['kimi-k2', 'kimi-latest', 'kimi-thinking-preview'],
     needsBaseUrl: false,
@@ -200,9 +213,9 @@ const providerPresets: ProviderPreset[] = [
     provider: 'minimax-cn',
     label: 'MiniMax 中国区',
     setupMode: 'official-api-key',
-    api: 'openai-completions',
+    api: 'anthropic-messages',
     apiKeyEnv: 'MINIMAX_CN_API_KEY',
-    baseUrl: '',
+    baseUrl: 'https://api.minimaxi.com/anthropic',
     note: 'Pi 内置 Provider，适合 MiniMax 中国区 API。',
     models: ['MiniMax-M2', 'MiniMax-Text-01'],
     needsBaseUrl: false,
@@ -214,7 +227,7 @@ const providerPresets: ProviderPreset[] = [
     setupMode: 'official-api-key',
     api: 'openai-completions',
     apiKeyEnv: 'ZAI_API_KEY',
-    baseUrl: '',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
     note: 'Pi 内置 OpenAI 兼容 Provider。',
     models: ['glm-4.6', 'glm-4.5', 'glm-4.5-air'],
     needsBaseUrl: false,
@@ -224,9 +237,9 @@ const providerPresets: ProviderPreset[] = [
     provider: 'kimi-coding',
     label: 'Kimi For Coding',
     setupMode: 'official-api-key',
-    api: 'openai-completions',
+    api: 'anthropic-messages',
     apiKeyEnv: 'KIMI_API_KEY',
-    baseUrl: '',
+    baseUrl: 'https://api.kimi.com/coding',
     note: 'Pi 内置 Provider，偏代码场景。',
     models: ['kimi-for-coding'],
     needsBaseUrl: false,
@@ -487,8 +500,12 @@ function getProviderRequirements(model: ModelProfileConfig): { needsBaseUrl: boo
   };
 }
 
-function requiredLabel(label: string): string {
-  return `${label} *`;
+function requiredLabel(label: string): ReactElement {
+  return (
+    <>
+      {label} <span className="required-star">*</span>
+    </>
+  );
 }
 
 function maskSecret(value: string): string {
@@ -917,6 +934,7 @@ function App(): ReactElement {
   const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities' | 'archived'>(
     'models',
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const selectedAgentIdRef = useRef<string | null>(null);
   const [modelFilters, setModelFilters] = useState({
@@ -927,6 +945,8 @@ function App(): ReactElement {
     reasoning: '',
   });
   const [modelEditor, setModelEditor] = useState<ModelProfileConfig | null>(null);
+  const [modelEditorSetAsDefault, setModelEditorSetAsDefault] = useState(false);
+  const [modelProviderSelectOverride, setModelProviderSelectOverride] = useState<string | null>(null);
   const [modelPage, setModelPage] = useState(1);
   const [modelPageInput, setModelPageInput] = useState('1');
   const [capabilityFilters, setCapabilityFilters] = useState({
@@ -943,6 +963,7 @@ function App(): ReactElement {
   const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
   const [renamingConversation, setRenamingConversation] = useState<AgentConversationState | null>(null);
   const [renameConversationTitle, setRenameConversationTitle] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   useEffect(() => {
     void refreshInitialState();
@@ -1034,12 +1055,6 @@ function App(): ReactElement {
       setCapabilityPageInput(String(capabilityTotalPages));
     }
   }, [capabilityPage, capabilityTotalPages]);
-
-  const defaultModelDisplayName = useMemo(() => {
-    const models = draftConfig?.model.models ?? [];
-    const defaultModel = models.find((model) => model.id === draftConfig?.model.defaultModelId);
-    return formatModelName(defaultModel);
-  }, [draftConfig?.model.defaultModelId, draftConfig?.model.models]);
 
   const primaryAgents = useMemo(
     () => (draftConfig?.agents ?? []).filter((agent) => agent.type === 'primary' && agent.enabled),
@@ -1310,36 +1325,40 @@ function App(): ReactElement {
     if (!selectedAgent) {
       return;
     }
-    const confirmed = window.confirm(`确认归档会话“${getConversationDisplayTitle(conversation, selectedAgent)}”吗？`);
-    if (!confirmed) {
-      return;
-    }
-    const agentConversations = agentConversationsRef.current[selectedAgent.id] ?? [];
-    const nextConversation = {
-      ...conversation,
-      archivedAt: new Date().toISOString(),
-    };
-    const nextConversations = agentConversations.map((item) =>
-      item.id === conversation.id ? nextConversation : item,
-    );
-    const nextActiveConversation =
-      nextConversations.find((item) => !item.archivedAt && item.id !== conversation.id) ??
-      createAgentConversation(selectedAgent);
-    agentConversationsRef.current = {
-      ...agentConversationsRef.current,
-      [selectedAgent.id]: nextConversations.some((item) => item.id === nextActiveConversation.id)
-        ? nextConversations
-        : [nextActiveConversation, ...nextConversations],
-    };
-    activeConversationIdsRef.current = {
-      ...activeConversationIdsRef.current,
-      [selectedAgent.id]: nextActiveConversation.id,
-    };
-    setConversationMenuId(null);
-    setActiveSection('config');
-    setActiveConfigTab('archived');
-    persistConversationStore();
-    setConversationRevision((revision) => revision + 1);
+    const agent = selectedAgent;
+    requestConfirm({
+      tone: 'default',
+      title: '归档会话',
+      message: `确认归档“${getConversationDisplayTitle(conversation, agent)}”？`,
+      confirmLabel: '归档',
+      onConfirm: () => {
+        const agentConversations = agentConversationsRef.current[agent.id] ?? [];
+        const nextConversation = {
+          ...conversation,
+          archivedAt: new Date().toISOString(),
+        };
+        const nextConversations = agentConversations.map((item) =>
+          item.id === conversation.id ? nextConversation : item,
+        );
+        const nextActiveConversation =
+          nextConversations.find((item) => !item.archivedAt && item.id !== conversation.id) ??
+          createAgentConversation(agent);
+        agentConversationsRef.current = {
+          ...agentConversationsRef.current,
+          [agent.id]: nextConversations.some((item) => item.id === nextActiveConversation.id)
+            ? nextConversations
+            : [nextActiveConversation, ...nextConversations],
+        };
+        activeConversationIdsRef.current = {
+          ...activeConversationIdsRef.current,
+          [agent.id]: nextActiveConversation.id,
+        };
+        setConversationMenuId(null);
+        openSettings('archived');
+        persistConversationStore();
+        setConversationRevision((revision) => revision + 1);
+      },
+    });
   }
 
   function openArchivedConversation(agentId: string, conversationId: string): void {
@@ -1571,13 +1590,13 @@ function App(): ReactElement {
     await refreshAuditLogs();
   }
 
-  async function syncModelAgentBindings(profile: ModelProfileConfig): Promise<ClientConfigState> {
+  async function syncModelAgentBindings(profile: ModelProfileConfig, setAsDefault: boolean): Promise<ClientConfigState> {
     if (!draftConfig) {
       throw new Error('Missing draft config');
     }
     let nextConfigState = await window.windowsClient.saveModelConfig({
       ...draftConfig.model,
-      defaultModelId: draftConfig.model.defaultModelId ?? profile.id,
+      defaultModelId: setAsDefault || !draftConfig.model.defaultModelId ? profile.id : draftConfig.model.defaultModelId,
       models: draftConfig.model.models.some((model) => model.id === profile.id)
         ? draftConfig.model.models.map((model) => (model.id === profile.id ? profile : model))
         : [...draftConfig.model.models, profile],
@@ -1654,10 +1673,10 @@ function App(): ReactElement {
     }
 
     setStatusText(`正在保存模型：${normalizedProfile.displayName}`);
-    const nextConfig = await syncModelAgentBindings(normalizedProfile);
+    const nextConfig = await syncModelAgentBindings(normalizedProfile, modelEditorSetAsDefault);
     setConfigState(nextConfig);
     setDraftConfig(nextConfig.config);
-    setModelEditor(null);
+    closeModelEditor();
     const saveMessage = shouldForceDisabled
       ? `模型已保存但未启用：${normalizedProfile.displayName}。请先测试联通成功后再启用。`
       : `模型已保存：${normalizedProfile.displayName}`;
@@ -1679,10 +1698,26 @@ function App(): ReactElement {
       setStatusText('模型需要先测试联通成功，才能启用');
       return;
     }
-    await saveModelProfile({ ...profile, enabled });
+    requestConfirm({
+      tone: enabled ? 'default' : 'danger',
+      title: enabled ? '启用模型' : '停用模型',
+      message: `${enabled ? '启用' : '停用'}“${profile.displayName || profile.modelId}”？`,
+      confirmLabel: enabled ? '启用' : '停用',
+      onConfirm: () => saveModelProfile({ ...profile, enabled }),
+    });
   }
 
-  async function testModelConnection(profile: ModelProfileConfig): Promise<void> {
+  function testModelConnection(profile: ModelProfileConfig): void {
+    requestConfirm({
+      tone: 'default',
+      title: '测试模型联通',
+      message: `将向“${profile.displayName || profile.modelId || profile.provider}”发送一条短测试消息。`,
+      confirmLabel: '开始测试',
+      onConfirm: () => runModelConnectionTest(profile),
+    });
+  }
+
+  async function runModelConnectionTest(profile: ModelProfileConfig): Promise<void> {
     if (!draftConfig) {
       return;
     }
@@ -1769,20 +1804,21 @@ function App(): ReactElement {
       setStatusText('该模型已有智能体使用，暂不能删除');
       return;
     }
-    const confirmed = window.confirm(
-      `确认删除模型“${profile.displayName || profile.modelId || profile.id}”吗？删除后不能从客户端直接恢复。`,
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setStatusText(`正在删除模型：${profile.displayName}`);
-    const nextConfig = await window.windowsClient.deleteModelConfig(id);
-    setConfigState(nextConfig);
-    setDraftConfig(nextConfig.config);
-    setConfigNotice({ tone: 'success', text: `模型已删除：${profile.displayName}` });
-    setStatusText(`模型已删除：${profile.displayName}`);
-    await refreshAuditLogs();
+    requestConfirm({
+      tone: 'danger',
+      title: '删除模型',
+      message: `确认删除“${profile.displayName || profile.modelId || profile.id}”？删除后不能从客户端直接恢复。`,
+      confirmLabel: '删除',
+      onConfirm: async () => {
+        setStatusText(`正在删除模型：${profile.displayName}`);
+        const nextConfig = await window.windowsClient.deleteModelConfig(id);
+        setConfigState(nextConfig);
+        setDraftConfig(nextConfig.config);
+        setConfigNotice({ tone: 'success', text: `模型已删除：${profile.displayName}` });
+        setStatusText(`模型已删除：${profile.displayName}`);
+        await refreshAuditLogs();
+      },
+    });
   }
 
   async function saveCapabilityConfig(capability: CapabilityConfig): Promise<void> {
@@ -1872,8 +1908,46 @@ function App(): ReactElement {
     });
   }
 
+  function openModelEditor(profile: ModelProfileConfig): void {
+    setModelEditorNotice(null);
+    setModelProviderSelectOverride(null);
+    setModelEditorSetAsDefault(
+      draftConfig?.model.defaultModelId === profile.id || !draftConfig?.model.defaultModelId,
+    );
+    setModelEditor(profile);
+  }
+
+  function closeModelEditor(): void {
+    setModelProviderSelectOverride(null);
+    setModelEditor(null);
+    setModelEditorSetAsDefault(false);
+  }
+
+  function openSettings(tab: typeof activeConfigTab = activeConfigTab): void {
+    setActiveConfigTab(tab);
+    setSettingsOpen(true);
+  }
+
+  function closeSettings(): void {
+    setSettingsOpen(false);
+  }
+
+  function requestConfirm(dialog: ConfirmDialogState): void {
+    setConfirmDialog(dialog);
+  }
+
+  async function confirmDialogAction(): Promise<void> {
+    const dialog = confirmDialog;
+    if (!dialog) {
+      return;
+    }
+    setConfirmDialog(null);
+    await dialog.onConfirm();
+  }
+
   function applyProviderPreset(provider: string): void {
     setModelEditorNotice(null);
+    setModelProviderSelectOverride(provider || null);
     const preset = providerPresets.find((item) => item.provider === provider);
     if (!preset) {
       setModelEditor((model) =>
@@ -2344,13 +2418,17 @@ function App(): ReactElement {
   const modelEditorRequirements = modelEditor
     ? getProviderRequirements(modelEditor)
     : { needsBaseUrl: false, needsApiKey: false };
-  const modelProviderSelectValue = modelEditor
-    ? modelEditorPreset
-      ? modelEditorPreset.provider
-      : modelEditor.provider
-        ? '__custom__'
-        : ''
-    : '';
+  const modelProviderSelectValue =
+    modelProviderSelectOverride ??
+    (modelEditor
+      ? modelEditorPreset
+        ? modelEditorPreset.provider
+        : modelEditor.provider
+          ? '__custom__'
+          : ''
+      : '');
+  const shouldShowCustomProviderId =
+    modelEditor !== null && (modelProviderSelectValue === '__custom__' || isCustomProviderSelection(modelEditor.provider));
   const modelSuggestions = modelEditorPreset?.models ?? [];
   const capabilityEditorExists = Boolean(
     capabilityEditor && draftConfig?.capabilities.some((capability) => capability.id === capabilityEditor.id),
@@ -2449,7 +2527,7 @@ function App(): ReactElement {
           )}
         </div>
 
-        <button type="button" className="sidebar-settings" onClick={() => setActiveSection('config')}>
+        <button type="button" className="sidebar-settings" onClick={() => openSettings('models')}>
           <Settings size={16} />
           <span>设置</span>
         </button>
@@ -2483,8 +2561,8 @@ function App(): ReactElement {
         </button>
         <button
           type="button"
-          className={activeSection === 'config' ? 'active' : ''}
-          onClick={() => setActiveSection('config')}
+          className={settingsOpen ? 'active' : ''}
+          onClick={() => openSettings('models')}
         >
           配置中心
         </button>
@@ -3036,18 +3114,32 @@ function App(): ReactElement {
           </>
         )}
 
-        {activeSection === 'config' && (
-          <>
-        <article className="panel wide-panel config-panel">
+        {settingsOpen && (
+          <div className="settings-overlay" role="presentation">
+        <article className="panel wide-panel config-panel settings-panel" role="dialog" aria-modal="true" aria-label="配置中心">
           <div className="panel-heading with-action">
             <div>
               <Settings size={20} />
               <h3>配置中心</h3>
+              <button
+                type="button"
+                className="hint-icon-button"
+                title={configState ? `配置文件：${configState.configPath}` : '正在读取客户端配置。'}
+                aria-label="配置文件位置"
+              >
+                <Info size={15} />
+              </button>
+            </div>
+            <div className="settings-heading-actions">
+              <button type="button" className="quiet-button compact-button" onClick={closeSettings}>
+                <ArrowLeft size={16} />
+                <span>返回</span>
+              </button>
+              <button type="button" className="modal-close-button" onClick={closeSettings} aria-label="关闭">
+                <X size={18} />
+              </button>
             </div>
           </div>
-          <p className="subtle-text">
-            {configState ? `配置文件：${configState.configPath}` : '正在读取客户端配置。'}
-          </p>
           {configNotice && <InlineNotice tone={configNotice.tone} text={configNotice.text} />}
           {draftConfig && (
               <div className="settings-stack">
@@ -3234,14 +3326,20 @@ function App(): ReactElement {
                 <div className="section-title-row">
                   <div>
                     <strong>模型 / Provider</strong>
-                    <span>按列表管理官方 Provider、自定义模型、国内厂商和本地模型。</span>
+                    <button
+                      type="button"
+                      className="hint-icon-button"
+                      title="按列表管理官方 Provider、自定义模型、国内厂商和本地模型。默认模型全局只能有一个，可在新建或编辑模型时指定。"
+                      aria-label="模型列表说明"
+                    >
+                      <Info size={15} />
+                    </button>
                   </div>
                   <button
                     type="button"
                     className="primary-action-button"
                     onClick={() => {
-                      setModelEditorNotice(null);
-                      setModelEditor(createModelProfile());
+                      openModelEditor(createModelProfile());
                     }}
                   >
                     <Plus size={16} />
@@ -3321,72 +3419,82 @@ function App(): ReactElement {
                       <option value="no">不支持</option>
                     </select>
                   </label>
-                  <div className="settings-meta compact-meta">
-                    <strong>默认模型</strong>
-                    <span>{defaultModelDisplayName}</span>
-                  </div>
                 </div>
 
                 <div className="model-list list-page-body">
                   {filteredModels.length === 0 ? (
                     <p className="empty-state">暂无匹配模型。可以新增官方 Provider、本地模型或自定义模型。</p>
                   ) : (
-                    pagedModels.map((model) => (
-                      <div className="model-row" key={model.id}>
-                        <div>
-                          <strong>{model.displayName}</strong>
-                          <span>
-                            {model.providerLabel || model.provider} / {model.modelId || '未填写模型 ID'}
-                          </span>
-                        </div>
-                        <small>{setupModeLabels[model.setupMode]}</small>
-                        <small>{model.input.includes('image') ? '文本 + 视觉' : '文本'}</small>
-                        <small>{model.supportsReasoning ? '支持思考' : '无思考'}</small>
-                        <small>{model.contextWindow ? `${model.contextWindow.toLocaleString()} ctx` : '上下文未填'}</small>
-                        <small className={model.connectionStatus === 'success' ? 'enabled' : 'disabled'}>
-                          {model.connectionStatus === 'success'
-                            ? '联通'
-                            : model.connectionStatus === 'failure'
-                              ? '失败'
-                              : '未测试'}
-                        </small>
-                        <div className="button-row">
-                          <button
-                            type="button"
-                            className="quiet-button compact-button"
-                            onClick={() => {
-                              setModelEditorNotice(null);
-                              setModelEditor(hydrateModelAgentUsage(model, draftConfig.agents));
-                            }}
-                          >
-                            编辑
-                          </button>
-                          <button
-                            type="button"
-                            className="quiet-button compact-button"
-                            disabled={!model.enabled && model.connectionStatus !== 'success'}
-                            title={!model.enabled && model.connectionStatus !== 'success' ? '请先测试联通成功' : undefined}
-                            onClick={() => updateModelEnabled(model, !model.enabled)}
-                          >
-                            {model.enabled ? '停用' : '启用'}
-                          </button>
-                          <button
-                            type="button"
-                            className="quiet-button compact-button"
-                            onClick={() => deleteModelProfile(model.id)}
-                          >
-                            删除
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button compact-button"
-                            onClick={() => testModelConnection(model)}
-                          >
-                            测试
-                          </button>
-                        </div>
+                    <>
+                      <div className="model-row model-row-header">
+                        <strong>模型</strong>
+                        <strong>默认</strong>
+                        <strong>接入方式</strong>
+                        <strong>能力</strong>
+                        <strong>思考</strong>
+                        <strong>上下文</strong>
+                        <strong>状态</strong>
+                        <strong>操作</strong>
                       </div>
-                    ))
+                      {pagedModels.map((model) => (
+                        <div className="model-row" key={model.id}>
+                          <div>
+                            <strong>{model.displayName}</strong>
+                            <span>
+                              {model.providerLabel || model.provider} / {model.modelId || '未填写模型 ID'}
+                            </span>
+                          </div>
+                          <small className={draftConfig.model.defaultModelId === model.id ? 'enabled' : 'muted-cell'}>
+                            {draftConfig.model.defaultModelId === model.id ? '默认' : '-'}
+                          </small>
+                          <small>{setupModeLabels[model.setupMode]}</small>
+                          <small>{model.input.includes('image') ? '文本 + 视觉' : '文本'}</small>
+                          <small>{model.supportsReasoning ? '支持思考' : '无思考'}</small>
+                          <small>{model.contextWindow ? `${model.contextWindow.toLocaleString()} ctx` : '上下文未填'}</small>
+                          <small className={model.connectionStatus === 'success' ? 'enabled' : 'disabled'}>
+                            {model.connectionStatus === 'success'
+                              ? '联通'
+                              : model.connectionStatus === 'failure'
+                                ? '失败'
+                                : '未测试'}
+                          </small>
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => {
+                                openModelEditor(hydrateModelAgentUsage(model, draftConfig.agents));
+                              }}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              disabled={!model.enabled && model.connectionStatus !== 'success'}
+                              title={!model.enabled && model.connectionStatus !== 'success' ? '请先测试联通成功' : undefined}
+                              onClick={() => updateModelEnabled(model, !model.enabled)}
+                            >
+                              {model.enabled ? '停用' : '启用'}
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => deleteModelProfile(model.id)}
+                            >
+                              删除
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button compact-button"
+                              onClick={() => testModelConnection(model)}
+                            >
+                              测试
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </>
                   )}
                 </div>
                 <PaginationBar
@@ -3415,8 +3523,7 @@ function App(): ReactElement {
                     type="button"
                     className="primary-action-button compact-button"
                     onClick={() => {
-                      setModelEditorNotice(null);
-                      setModelEditor(createModelProfile());
+                      openModelEditor(createModelProfile());
                     }}
                   >
                     <Plus size={16} />
@@ -3609,7 +3716,7 @@ function App(): ReactElement {
             </div>
           )}
         </article>
-          </>
+          </div>
         )}
 
         {activeSection === 'logs' && (
@@ -3776,8 +3883,8 @@ function App(): ReactElement {
                 <Settings size={20} />
                 <h3>重命名会话</h3>
               </div>
-              <button type="button" className="modal-close-button" onClick={() => setRenamingConversation(null)}>
-                关闭
+              <button type="button" className="modal-close-button" onClick={() => setRenamingConversation(null)} aria-label="关闭">
+                <X size={18} />
               </button>
             </div>
             <div className="model-form-layout">
@@ -3819,7 +3926,7 @@ function App(): ReactElement {
                 onClick={() => setExpandedAuditEntry(null)}
                 aria-label="关闭"
               >
-                关闭
+                <X size={18} />
               </button>
             </div>
             <div className="audit-detail-meta">
@@ -3834,6 +3941,39 @@ function App(): ReactElement {
         </div>
       )}
 
+      {confirmDialog && (
+        <div className="modal-backdrop action-dialog-backdrop" role="presentation">
+          <section
+            className={`modal-panel action-dialog ${confirmDialog.tone === 'danger' ? 'danger' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={confirmDialog.title}
+          >
+            <div className="action-dialog-icon">
+              <AlertTriangle size={22} />
+            </div>
+            <div className="action-dialog-copy">
+              <h3>{confirmDialog.title}</h3>
+              <p>{confirmDialog.message}</p>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="quiet-button" onClick={() => setConfirmDialog(null)}>
+                {confirmDialog.cancelLabel ?? '取消'}
+              </button>
+              <button
+                type="button"
+                className={confirmDialog.tone === 'danger' ? 'danger-button' : 'primary-action-button'}
+                onClick={() => {
+                  void confirmDialogAction();
+                }}
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {agentEditor && draftConfig && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-panel" role="dialog" aria-modal="true" aria-label="编辑智能体">
@@ -3843,7 +3983,7 @@ function App(): ReactElement {
                 <h3>{agentEditor.name ? `编辑智能体：${agentEditor.name}` : '新增智能体'}</h3>
               </div>
               <button type="button" className="modal-close-button" onClick={() => setAgentEditor(null)} aria-label="关闭">
-                关闭
+                <X size={18} />
               </button>
             </div>
             <div className="model-form-layout">
@@ -3852,7 +3992,7 @@ function App(): ReactElement {
                 <span>智能体是会话入口，负责绑定模型、业务能力和子智能体。</span>
               </div>
               <label>
-                <span>智能体名称 *</span>
+                <span>{requiredLabel('智能体名称')}</span>
                 <input
                   value={agentEditor.name}
                   onChange={(event) => updateAgentEditor('name', event.target.value)}
@@ -4033,7 +4173,7 @@ function App(): ReactElement {
               </div>
 
               {agentEditor.type === 'sub' && (
-                <div className="wide-field checklist-box">
+                <div className="wide-field checklist-box selection-list">
                   <strong>上级主智能体 / 可复用挂载点</strong>
                   {draftConfig.agents.filter((agent) => agent.id !== agentEditor.id).map((agent) => (
                     <label className="checkbox-row" key={agent.id}>
@@ -4048,8 +4188,8 @@ function App(): ReactElement {
                 </div>
               )}
 
-              <div className="wide-field checklist-box">
-                <strong>可用模型 *</strong>
+              <div className="wide-field checklist-box selection-list">
+                <strong>{requiredLabel('可用模型')}</strong>
                 {draftConfig.model.models.length === 0 ? (
                   <p className="empty-state">请先在模型配置中新增并测试模型。</p>
                 ) : (
@@ -4084,7 +4224,7 @@ function App(): ReactElement {
                 </select>
               </label>
 
-              <div className="wide-field checklist-box">
+              <div className="wide-field checklist-box selection-list">
                 <strong>可用 Tools / Skills</strong>
                 {draftConfig.capabilities.map((capability) => (
                   <label className="checkbox-row" key={capability.id}>
@@ -4100,7 +4240,7 @@ function App(): ReactElement {
               </div>
 
               {agentEditor.type === 'primary' && (
-                <div className="wide-field checklist-box">
+                <div className="wide-field checklist-box selection-list">
                   <strong>可调度子智能体</strong>
                   {draftConfig.agents
                     .filter((agent) => agent.type === 'sub' && agent.id !== agentEditor.id)
@@ -4156,8 +4296,8 @@ function App(): ReactElement {
                 <Settings size={20} />
                 <h3>{modelEditor.displayName ? `编辑模型：${modelEditor.displayName}` : '新增模型'}</h3>
               </div>
-              <button type="button" className="modal-close-button" onClick={() => setModelEditor(null)} aria-label="关闭">
-                关闭
+              <button type="button" className="modal-close-button" onClick={closeModelEditor} aria-label="关闭">
+                <X size={18} />
               </button>
             </div>
             {modelEditorNotice && (
@@ -4167,7 +4307,9 @@ function App(): ReactElement {
             <div className="model-form-layout">
               <div className="form-section-heading wide-field">
                 <strong>基础信息</strong>
-                <span>选择供应商，填写模型和 API Key。带 * 的字段为保存前必填。</span>
+                <span>
+                  选择供应商，填写模型和 API Key。带 <span className="required-star">*</span> 的字段为保存前必填。
+                </span>
               </div>
               <label>
                 <span>{requiredLabel('供应商')}</span>
@@ -4184,7 +4326,7 @@ function App(): ReactElement {
                   系统会自动选择接入方式：{setupModeLabels[modelEditor.setupMode]}。
                 </small>
               </label>
-              {isCustomProviderSelection(modelEditor.provider) && (
+              {shouldShowCustomProviderId && (
                 <label>
                   <span>{requiredLabel('供应商标识')}</span>
                   <input
@@ -4218,6 +4360,14 @@ function App(): ReactElement {
                   placeholder="默认使用模型 ID，也可改成你熟悉的名字"
                 />
                 <small className="field-hint">可留空；保存时会自动使用模型 ID。多个模型显示名称相同也可以。</small>
+              </label>
+              <label className="checkbox-row form-checkbox">
+                <input
+                  type="checkbox"
+                  checked={modelEditorSetAsDefault}
+                  onChange={(event) => setModelEditorSetAsDefault(event.target.checked)}
+                />
+                <span>设为默认模型</span>
               </label>
 
               <div className="form-section-heading wide-field">
@@ -4258,6 +4408,83 @@ function App(): ReactElement {
                   <small className="field-hint">Ollama / LM Studio 等本地 OpenAI 兼容服务通常忽略 API Key。</small>
                 </label>
               )}
+
+              <details className="wide-field advanced-capability-box">
+                <summary>高级接入参数</summary>
+                <div className="settings-grid advanced-grid">
+                  <label>
+                    <span>{requiredLabel('API 类型')}</span>
+                    <select
+                      value={modelEditor.api}
+                      onChange={(event) => updateModelEditor('api', event.target.value as ModelProfileConfig['api'])}
+                    >
+                      <option value="openai-responses">OpenAI Responses</option>
+                      <option value="openai-completions">OpenAI Chat Completions</option>
+                      <option value="anthropic-messages">Anthropic Messages</option>
+                      <option value="google-generative-ai">Google Generative AI</option>
+                      <option value="mistral-conversations">Mistral Conversations</option>
+                      <option value="custom">自定义</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>API Key 环境变量</span>
+                    <input
+                      value={modelEditor.apiKeyEnv}
+                      onChange={(event) => updateModelEditor('apiKeyEnv', event.target.value.trim())}
+                      placeholder="例如 DASHSCOPE_API_KEY"
+                    />
+                  </label>
+                  <label>
+                    <span>认证方式</span>
+                    <select
+                      value={modelEditor.authType}
+                      onChange={(event) => updateModelEditor('authType', event.target.value as ModelProfileConfig['authType'])}
+                    >
+                      <option value="env">API Key</option>
+                      <option value="oauth">OAuth</option>
+                      <option value="none">无需认证</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Transport</span>
+                    <select
+                      value={modelEditor.transport}
+                      onChange={(event) => updateModelEditor('transport', event.target.value as ModelProfileConfig['transport'])}
+                    >
+                      <option value="auto">auto</option>
+                      <option value="sse">sse</option>
+                      <option value="websocket">websocket</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>超时毫秒</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={modelEditor.timeoutMs}
+                      onChange={(event) => updateModelEditor('timeoutMs', Number(event.target.value))}
+                    />
+                  </label>
+                  <label>
+                    <span>最大重试次数</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={modelEditor.maxRetries}
+                      onChange={(event) => updateModelEditor('maxRetries', Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="wide-field">
+                    <span>Compat JSON</span>
+                    <textarea
+                      value={modelEditor.compat}
+                      onChange={(event) => updateModelEditor('compat', event.target.value)}
+                      rows={4}
+                      placeholder='例如 {"thinkingFormat":"qwen"}'
+                    />
+                  </label>
+                </div>
+              </details>
 
               <div className="form-section-heading wide-field">
                 <strong>模型能力</strong>
@@ -4330,7 +4557,7 @@ function App(): ReactElement {
                 <span>支持思考 / Reasoning</span>
               </label>
 
-              <div className="wide-field checklist-box">
+              <div className="wide-field checklist-box selection-list">
                 <strong>可用智能体</strong>
                 {(draftConfig?.agents ?? []).length === 0 ? (
                   <p className="empty-state">暂无智能体。</p>
@@ -4407,8 +4634,13 @@ function App(): ReactElement {
                 <ShieldCheck size={20} />
                 <h3>{capabilityEditorExists ? `编辑能力：${capabilityEditor.name}` : '新增能力'}</h3>
               </div>
-              <button type="button" className="quiet-button compact-button" onClick={() => setCapabilityEditor(null)}>
-                关闭
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setCapabilityEditor(null)}
+                aria-label="关闭"
+              >
+                <X size={18} />
               </button>
             </div>
 

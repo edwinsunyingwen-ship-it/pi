@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import { X } from 'lucide-react';
 
 interface ModalShellProps {
   title: ReactNode;
@@ -28,7 +29,7 @@ export function ModalShell({
             <h3>{title}</h3>
           </div>
           <button type="button" className="modal-close-button" onClick={onClose} aria-label="关闭">
-            关闭
+            <X size={18} />
           </button>
         </div>
         {children}

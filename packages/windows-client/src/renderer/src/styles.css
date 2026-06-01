@@ -2103,20 +2103,22 @@ dd {
   border: 1px solid transparent;
   color: #5b5751;
   display: inline-flex;
-  font-size: 0.92rem;
-  font-weight: 800;
   height: 34px;
   justify-content: center;
   line-height: 1;
   min-height: 34px;
-  padding: 0 12px;
-  width: auto;
+  padding: 0;
+  width: 34px;
 }
 
 .modal-close-button:hover {
   background: #ece8e1;
   border-color: #d8cec3;
   color: #1f1d1a;
+}
+
+.modal-close-button svg {
+  pointer-events: none;
 }
 
 .tool-list {
@@ -3845,6 +3847,261 @@ select:focus {
 
 .app-shell > .dashboard-grid .composer-send-button:hover:not(:disabled) {
   background: #0f172a;
+}
+
+.settings-overlay {
+  align-items: stretch;
+  background: rgb(15 23 42 / 42%);
+  display: flex;
+  inset: 0;
+  padding: 0;
+  position: fixed;
+  z-index: 20;
+}
+
+.modal-backdrop {
+  z-index: 30;
+}
+
+.settings-panel {
+  background: #fff;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: none;
+  max-width: none;
+  overflow: hidden;
+  padding: 0;
+  width: 100vw;
+}
+
+.settings-panel > .panel-heading {
+  border-bottom: 1px solid #eef1f5;
+  margin: 0;
+  min-height: 58px;
+  padding: 10px 18px;
+}
+
+.settings-panel > .panel-heading > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.settings-heading-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.hint-icon-button {
+  background: #f3f6fb;
+  border: 1px solid #e5eaf0;
+  border-radius: 999px;
+  color: #475467;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0;
+  width: 28px;
+}
+
+.hint-icon-button:hover {
+  background: #eaf0f7;
+  color: #101828;
+}
+
+.settings-panel > .inline-notice {
+  margin: 10px 18px 0;
+}
+
+.settings-panel .settings-stack {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-panel .config-tabs {
+  align-content: start;
+  align-self: stretch;
+  background: #f8fafc;
+  border: 0;
+  border-right: 1px solid #eef1f5;
+  border-radius: 0;
+  display: grid;
+  gap: 4px;
+  padding: 14px 10px;
+}
+
+.settings-panel .config-tabs button {
+  border-radius: 8px;
+  color: #344054;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.settings-panel .config-tabs button:hover,
+.settings-panel .config-tabs button.active {
+  background: #e8f1ee;
+  color: #174f45;
+}
+
+.settings-panel .config-block {
+  border-top: 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 16px 18px;
+}
+
+.settings-panel .config-block.list-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+}
+
+.settings-panel .section-title-row {
+  min-height: 42px;
+}
+
+.settings-panel .section-title-row > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.settings-panel .section-title-row > div > span {
+  display: none;
+}
+
+.settings-panel .model-toolbar {
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(132px, 1fr));
+}
+
+.settings-panel .model-toolbar select,
+.settings-panel .model-toolbar input {
+  min-height: 38px;
+}
+
+.settings-panel .list-page-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.model-row {
+  grid-template-columns:
+    minmax(220px, 1.6fr)
+    minmax(58px, 0.42fr)
+    minmax(140px, 0.9fr)
+    minmax(90px, 0.55fr)
+    minmax(86px, 0.55fr)
+    minmax(106px, 0.68fr)
+    minmax(78px, 0.48fr)
+    minmax(260px, auto);
+}
+
+.model-row-header {
+  background: #fff;
+  border-color: transparent;
+  border-bottom: 1px solid #e4e7ec;
+  border-radius: 0;
+  color: #475467;
+  font-size: 0.82rem;
+  font-weight: 900;
+  min-height: 38px;
+  padding: 8px 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.model-row-header strong {
+  color: #475467;
+  white-space: nowrap;
+}
+
+.muted-cell {
+  color: #98a2b3;
+}
+
+.selection-list {
+  align-content: start;
+  max-height: none;
+  overflow: visible;
+}
+
+.selection-list .checkbox-row {
+  background: #fff;
+  border: 1px solid #e8edf2;
+  border-radius: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.selection-list .checkbox-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-dialog-backdrop {
+  z-index: 40;
+}
+
+.action-dialog {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  max-width: 460px;
+  padding: 22px;
+}
+
+.action-dialog .modal-actions {
+  grid-column: 1 / -1;
+  padding: 14px 0 0;
+}
+
+.action-dialog-icon {
+  align-items: center;
+  background: #eef4fa;
+  border-radius: 999px;
+  color: #294a66;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.action-dialog.danger .action-dialog-icon {
+  background: #fff1ed;
+  color: #a24435;
+}
+
+.action-dialog-copy h3 {
+  color: #101828;
+  font-size: 1.05rem;
+  margin: 0 0 6px;
+}
+
+.action-dialog-copy p {
+  color: #667085;
+  margin: 0;
+}
+
+.danger-button {
+  background: #a24435;
+}
+
+.danger-button:hover {
+  background: #823326;
 }
 
 @media (max-width: 760px) {
