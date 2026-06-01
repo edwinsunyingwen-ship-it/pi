@@ -2447,25 +2447,20 @@ function App(): ReactElement {
 
   return (
     <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <header className="app-chrome" aria-label="应用栏">
+        <button
+          type="button"
+          className="sidebar-toggle-button"
+          onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          aria-label={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+          title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+      </header>
       <aside className="global-sidebar" aria-label="司南导航">
-        <div className="sidebar-brand">
-          <div className="sidebar-brand-main">
-            <span className="brand-mark">司</span>
-            <strong>司南</strong>
-          </div>
-          <button
-            type="button"
-            className="sidebar-toggle-button"
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-            aria-label={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
-            title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
-        </div>
-
         <div className="sidebar-actions">
-          <button type="button" onClick={createNewConversation} disabled={!selectedAgent}>
+          <button type="button" onClick={createNewConversation} disabled={!selectedAgent} title="新对话">
             <Plus size={16} />
             <span>新对话</span>
           </button>
@@ -2473,6 +2468,7 @@ function App(): ReactElement {
             type="button"
             className={activeSection === 'search' ? 'active' : ''}
             onClick={() => setActiveSection('search')}
+            title="搜索"
           >
             <Search size={16} />
             <span>搜索</span>
@@ -2481,6 +2477,7 @@ function App(): ReactElement {
             type="button"
             className={activeSection === 'logs' ? 'active' : ''}
             onClick={() => setActiveSection('logs')}
+            title="运行日志"
           >
             <ListChecks size={16} />
             <span>运行日志</span>
@@ -2489,6 +2486,7 @@ function App(): ReactElement {
             type="button"
             className={activeSection === 'billing' ? 'active' : ''}
             onClick={() => setActiveSection('billing')}
+            title="消费明细"
           >
             <FileText size={16} />
             <span>消费明细</span>
@@ -2546,7 +2544,7 @@ function App(): ReactElement {
           )}
         </div>
 
-        <button type="button" className="sidebar-settings" onClick={() => openSettings('models')}>
+        <button type="button" className="sidebar-settings" onClick={() => openSettings('models')} title="设置">
           <Settings size={16} />
           <span>设置</span>
         </button>

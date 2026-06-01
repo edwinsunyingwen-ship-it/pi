@@ -3656,13 +3656,24 @@ select:focus {
 .app-shell {
   gap: 0;
   grid-template-columns: 248px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: 32px minmax(0, 1fr);
   padding: 0;
   transition: grid-template-columns 160ms ease;
 }
 
 .app-shell.sidebar-collapsed {
-  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
+.app-chrome {
+  align-items: center;
+  background: #fbfaf7;
+  border-bottom: 1px solid #e5ded5;
+  display: flex;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  padding: 0 8px;
 }
 
 .app-shell > .top-bar,
@@ -3672,47 +3683,58 @@ select:focus {
 
 .app-shell > .global-sidebar {
   grid-column: 1;
-  grid-row: 1;
-  transition:
-    box-shadow 160ms ease,
-    width 160ms ease;
-  width: 248px;
-  z-index: 10;
+  grid-row: 2;
+  height: calc(100vh - 32px);
+  padding-top: 10px;
+  position: relative;
+  top: auto;
+  width: auto;
+  z-index: 2;
 }
 
 .app-shell.sidebar-collapsed > .global-sidebar {
   overflow: hidden;
-  width: 62px;
 }
 
-.app-shell.sidebar-collapsed > .global-sidebar:hover,
-.app-shell.sidebar-collapsed > .global-sidebar:focus-within {
-  box-shadow: 10px 0 28px rgb(15 23 42 / 10%);
-  overflow: visible;
-  width: 248px;
-}
-
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-brand {
-  justify-content: center;
-}
-
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-brand-main,
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-actions span,
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-section-title,
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-conversations,
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-settings span {
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-actions span,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-section-title,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-conversations,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-settings span {
   display: none;
 }
 
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-actions button,
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-settings {
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-actions button,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-settings {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
+  position: relative;
 }
 
-.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-toggle-button {
-  background: #f0ede8;
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-actions,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-settings {
+  align-items: stretch;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-actions button:hover span,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-actions button:focus-visible span,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-settings:hover span,
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-settings:focus-visible span {
+  background: #fffdf8;
+  border: 1px solid #e5ded5;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 10%);
+  color: #202124;
+  display: block;
+  left: 42px;
+  padding: 7px 10px;
+  position: absolute;
+  white-space: nowrap;
+  z-index: 20;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar .sidebar-settings {
+  margin-top: auto;
 }
 
 .app-shell > .dashboard-grid {
@@ -3721,10 +3743,10 @@ select:focus {
   border-radius: 0;
   display: block;
   grid-column: 2;
-  grid-row: 1;
-  height: 100vh;
+  grid-row: 2;
+  height: calc(100vh - 32px);
   overflow: hidden;
-  padding: 18px 20px;
+  padding: 8px 18px 16px;
 }
 
 .app-shell > .dashboard-grid .workbench-grid {
@@ -3741,14 +3763,16 @@ select:focus {
 
 .app-shell > .dashboard-grid .workbench-shell {
   grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - 36px);
+  height: calc(100vh - 56px);
   min-height: 0;
   overflow: hidden;
-  padding: 6px 0 0;
+  padding: 0;
 }
 
 .app-shell > .dashboard-grid .agent-tabs {
   margin-top: 0;
+  min-height: 48px;
+  padding-bottom: 8px;
 }
 
 .app-shell > .dashboard-grid .agent-tab-actions {
