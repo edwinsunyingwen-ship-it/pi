@@ -120,13 +120,35 @@ select:focus {
 .sidebar-brand {
   align-items: center;
   display: flex;
+  justify-content: space-between;
   gap: 10px;
   min-height: 42px;
+}
+
+.sidebar-brand-main {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
 }
 
 .sidebar-brand strong {
   color: #121721;
   font-size: 18px;
+}
+
+.sidebar-toggle-button {
+  background: transparent;
+  color: #6d665d;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.sidebar-toggle-button:hover {
+  background: #e5eee8;
+  color: #1f4d45;
 }
 
 .sidebar-actions,
@@ -1052,6 +1074,22 @@ dd {
 
 .message-bubble strong {
   font-size: 0.78rem;
+}
+
+.message-meta {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.message-meta time {
+  color: #7a8494;
+  flex: 0 0 auto;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .message-bubble span {
@@ -3620,6 +3658,11 @@ select:focus {
   grid-template-columns: 248px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   padding: 0;
+  transition: grid-template-columns 160ms ease;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 62px minmax(0, 1fr);
 }
 
 .app-shell > .top-bar,
@@ -3630,6 +3673,46 @@ select:focus {
 .app-shell > .global-sidebar {
   grid-column: 1;
   grid-row: 1;
+  transition:
+    box-shadow 160ms ease,
+    width 160ms ease;
+  width: 248px;
+  z-index: 10;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar {
+  overflow: hidden;
+  width: 62px;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar:hover,
+.app-shell.sidebar-collapsed > .global-sidebar:focus-within {
+  box-shadow: 10px 0 28px rgb(15 23 42 / 10%);
+  overflow: visible;
+  width: 248px;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-brand {
+  justify-content: center;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-brand-main,
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-actions span,
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-section-title,
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-conversations,
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-settings span {
+  display: none;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-actions button,
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-settings {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.app-shell.sidebar-collapsed > .global-sidebar:not(:hover):not(:focus-within) .sidebar-toggle-button {
+  background: #f0ede8;
 }
 
 .app-shell > .dashboard-grid {
@@ -3661,6 +3744,7 @@ select:focus {
   height: calc(100vh - 36px);
   min-height: 0;
   overflow: hidden;
+  padding: 6px 0 0;
 }
 
 .app-shell > .dashboard-grid .agent-tabs {
@@ -3715,19 +3799,40 @@ select:focus {
   align-items: center;
   border-bottom: 1px solid #eef1f5;
   display: flex;
+  gap: 14px;
   justify-content: space-between;
-  min-height: 44px;
-  padding: 0 2px 10px;
+  min-height: 52px;
+  padding: 0 2px 12px;
 }
 
 .app-shell > .dashboard-grid .chat-header-main {
-  gap: 2px;
+  display: grid;
+  gap: 3px;
   min-width: 0;
 }
 
-.app-shell > .dashboard-grid .chat-header strong {
-  font-size: 1rem;
-  line-height: 1.3;
+.app-shell > .dashboard-grid .chat-header-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.app-shell > .dashboard-grid .chat-header-label {
+  color: #667085;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.app-shell > .dashboard-grid .chat-header-main strong {
+  color: #172033;
+  display: block;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-shell > .dashboard-grid .chat-header span {
@@ -3768,12 +3873,36 @@ select:focus {
   background: transparent;
   border: 0;
   border-radius: 0;
-  gap: 12px;
-  padding: 10px 4px 14px;
+  gap: 18px;
+  padding: 18px 8px 18px;
 }
 
 .app-shell > .dashboard-grid .message-bubble {
-  max-width: min(880px, 82%);
+  border-radius: 14px;
+  max-width: min(1120px, 86%);
+  padding: 13px 16px;
+}
+
+.app-shell > .dashboard-grid .message-bubble.user {
+  background: #e8f1ff;
+  border: 1px solid #cfddf5;
+  color: #14315f;
+  justify-self: end;
+}
+
+.app-shell > .dashboard-grid .message-bubble.assistant {
+  background: #fffdf8;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 5%);
+}
+
+.app-shell > .dashboard-grid .message-meta {
+  border-bottom: 1px solid rgb(148 163 184 / 20%);
+  padding-bottom: 5px;
+}
+
+.app-shell > .dashboard-grid .message-bubble.user .message-meta {
+  border-bottom-color: rgb(59 130 246 / 18%);
 }
 
 .app-shell > .dashboard-grid .workbench-composer {

@@ -15,6 +15,8 @@ import {
   Laptop,
   ListChecks,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   Save,
@@ -921,6 +923,7 @@ function App(): ReactElement {
     'workbench',
   );
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [conversationRevision, setConversationRevision] = useState(0);
   const conversationStoreLoadedRef = useRef(false);
   const [startingConversationId, setStartingConversationId] = useState<string | null>(null);
@@ -2443,11 +2446,22 @@ function App(): ReactElement {
     : '全部智能体';
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="global-sidebar" aria-label="司南导航">
         <div className="sidebar-brand">
-          <span className="brand-mark">司</span>
-          <strong>司南</strong>
+          <div className="sidebar-brand-main">
+            <span className="brand-mark">司</span>
+            <strong>司南</strong>
+          </div>
+          <button
+            type="button"
+            className="sidebar-toggle-button"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            aria-label={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+            title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
         </div>
 
         <div className="sidebar-actions">
@@ -2689,20 +2703,6 @@ function App(): ReactElement {
                 >
                   <Plus size={18} />
                 </button>
-                <button
-                  type="button"
-                  className="quiet-button compact-button"
-                  onClick={() => {
-                    if (selectedAgent) {
-                      setAgentEditor(selectedAgent);
-                      setActiveConfigTab('agents');
-                    }
-                  }}
-                  disabled={!selectedAgent}
-                >
-                  <Settings size={16} />
-                  <span>设置</span>
-                </button>
               </div>
             </div>
 
@@ -2773,18 +2773,40 @@ function App(): ReactElement {
               <section className="chat-workspace">
                 <div className="chat-header">
                   <div className="chat-header-main">
-                    <strong>{selectedAgent?.name ?? '请选择主智能体'}</strong>
-                    <span>
-                      {activeWorkspace.path ? `工作区：${activeWorkspace.path}` : '尚未选择工作区'}
-                    </span>
+                    <span className="chat-header-label">工作区</span>
+                    <strong>{activeWorkspace.path ?? '尚未选择工作区'}</strong>
                   </div>
-                  <div className={`agent-runtime-state ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`}>
-                    <span className={`status-dot ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`} />
-                    <strong>{sessionStarting ? '准备中' : sessionReady ? '已就绪' : '未就绪'}</strong>
+                  <div className="chat-header-actions">
+                    <button type="button" className="composer-tool-button" onClick={chooseWorkspace}>
+                      <FolderOpen size={16} />
+                      <span>工作区</span>
+                    </button>
+                    <button type="button" className="composer-tool-button" onClick={() => setContextPanelOpen(true)}>
+                      <FileText size={16} />
+                      <span>上下文</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="composer-tool-button"
+                      onClick={() => {
+                        if (selectedAgent) {
+                          setAgentEditor(selectedAgent);
+                          setActiveConfigTab('agents');
+                        }
+                      }}
+                      disabled={!selectedAgent}
+                    >
+                      <Settings size={16} />
+                      <span>智能体设置</span>
+                    </button>
+                    <div className={`agent-runtime-state ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`}>
+                      <span className={`status-dot ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`} />
+                      <strong>{sessionStarting ? '准备中' : sessionReady ? '已就绪' : '未就绪'}</strong>
+                    </div>
                   </div>
                 </div>
 
-                {agentNotice && <InlineNotice tone={agentNotice.tone} text={agentNotice.text} />}
+                {agentNotice && agentNotice.tone !== 'success' && <InlineNotice tone={agentNotice.tone} text={agentNotice.text} />}
 
                 <div className="conversation-list focused-conversation">
                   {transcript.length === 0 ? (
@@ -2806,7 +2828,10 @@ function App(): ReactElement {
                             messageElementRefs.current[anchorId] = node;
                           }}
                         >
-                          <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+                          <div className="message-meta">
+                            <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+                            <time dateTime={item.createdAt}>{formatLocalTimestamp(item.createdAt)}</time>
+                          </div>
                           <MarkdownMessage text={item.text} searchQuery={isSearchTarget ? targetQuery : undefined} />
                         </div>
                       );
@@ -2826,14 +2851,6 @@ function App(): ReactElement {
                   />
                   <div className="composer-bottom-bar">
                     <div className="composer-bottom-left">
-                      <button type="button" className="composer-tool-button" onClick={chooseWorkspace}>
-                        <FolderOpen size={16} />
-                        <span>工作区</span>
-                      </button>
-                      <button type="button" className="composer-tool-button" onClick={() => setContextPanelOpen(true)}>
-                        <FileText size={16} />
-                        <span>文件</span>
-                      </button>
                       {selectedAgentTaskTemplates.length > 0 && (
                         <select
                           className="task-template-select"
