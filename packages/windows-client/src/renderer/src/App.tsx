@@ -1577,17 +1577,22 @@ function App(): ReactElement {
       setStatusText('该智能体仍有下级引用，暂不能删除');
       return;
     }
-    if (!window.confirm(`确认删除智能体“${agent.name}”吗？`)) {
-      return;
-    }
-    const nextConfig = await window.windowsClient.deleteAgentConfig(id);
-    setConfigState(nextConfig);
-    setDraftConfig(nextConfig.config);
-    setAgentEditor(null);
-    setSelectedAgentId(nextConfig.config.defaultAgentId);
-    setConfigNotice({ tone: 'success', text: `智能体已删除：${agent.name}` });
-    setStatusText(`智能体已删除：${agent.name}`);
-    await refreshAuditLogs();
+    requestConfirm({
+      tone: 'danger',
+      title: '删除智能体',
+      message: `确认删除“${agent.name}”？`,
+      confirmLabel: '删除',
+      onConfirm: async () => {
+        const nextConfig = await window.windowsClient.deleteAgentConfig(id);
+        setConfigState(nextConfig);
+        setDraftConfig(nextConfig.config);
+        setAgentEditor(null);
+        setSelectedAgentId(nextConfig.config.defaultAgentId);
+        setConfigNotice({ tone: 'success', text: `智能体已删除：${agent.name}` });
+        setStatusText(`智能体已删除：${agent.name}`);
+        await refreshAuditLogs();
+      },
+    });
   }
 
   async function syncModelAgentBindings(profile: ModelProfileConfig, setAsDefault: boolean): Promise<ClientConfigState> {
