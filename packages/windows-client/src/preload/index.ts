@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
 import type { WindowsClientApi } from "../shared/types";
 
@@ -28,8 +28,9 @@ const api: WindowsClientApi = {
 		ipcRenderer.invoke(IPC_CHANNELS.agentStartSession, agentId, workspacePath),
 	stopAgentSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.agentStopSession, sessionId),
 	getAgentSessionState: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.agentGetSessionState, sessionId),
-	sendAgentUserMessage: (sessionId, message) =>
-		ipcRenderer.invoke(IPC_CHANNELS.agentSendUserMessage, sessionId, message),
+	getFilePath: (file) => webUtils.getPathForFile(file),
+	sendAgentUserMessage: (sessionId, message, images) =>
+		ipcRenderer.invoke(IPC_CHANNELS.agentSendUserMessage, sessionId, message, images),
 	listAvailableTools: () => ipcRenderer.invoke(IPC_CHANNELS.agentListAvailableTools),
 };
 

@@ -4032,6 +4032,87 @@ select:focus {
   border-bottom-color: rgb(59 130 246 / 18%);
 }
 
+.app-shell > .dashboard-grid .message-attachment-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.app-shell > .dashboard-grid .message-attachment-card {
+  background: rgb(255 255 255 / 60%);
+  border: 1px solid rgb(148 163 184 / 28%);
+  border-radius: 8px;
+  color: #26364c;
+  max-width: 520px;
+}
+
+.app-shell > .dashboard-grid .message-attachment-card summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  list-style: none;
+  min-height: 42px;
+  padding: 7px 9px;
+}
+
+.app-shell > .dashboard-grid .message-attachment-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-shell > .dashboard-grid .message-attachment-preview {
+  aspect-ratio: 1;
+  border: 1px solid rgb(148 163 184 / 28%);
+  border-radius: 6px;
+  height: 28px;
+  object-fit: cover;
+  width: 28px;
+}
+
+.app-shell > .dashboard-grid .message-attachment-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.app-shell > .dashboard-grid .message-attachment-main strong,
+.app-shell > .dashboard-grid .message-attachment-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell > .dashboard-grid .message-attachment-main small {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.app-shell > .dashboard-grid .message-attachment-card dl {
+  border-top: 1px solid rgb(148 163 184 / 20%);
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 8px 10px 10px;
+}
+
+.app-shell > .dashboard-grid .message-attachment-card dl div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 58px minmax(0, 1fr);
+}
+
+.app-shell > .dashboard-grid .message-attachment-card dt {
+  color: #64748b;
+  font-size: 0.74rem;
+}
+
+.app-shell > .dashboard-grid .message-attachment-card dd {
+  font-size: 0.76rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .app-shell > .dashboard-grid .workbench-composer {
   background: #fff;
   border: 1px solid #d9dee7;

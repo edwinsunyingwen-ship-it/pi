@@ -1,6 +1,7 @@
 import type {
 	AgentCapabilityCallLog,
 	AgentConfig,
+	AgentImageContent,
 	AgentMessageResult,
 	AgentSession,
 	AgentToolInfo,
@@ -81,7 +82,11 @@ export class AgentService {
 		return session;
 	}
 
-	async sendUserMessage(sessionId: string, message: string): Promise<AgentMessageResult> {
+	async sendUserMessage(
+		sessionId: string,
+		message: string,
+		images?: AgentImageContent[],
+	): Promise<AgentMessageResult> {
 		await this.writeAudit({
 			sessionId,
 			businessAction: "agent-user-question",
@@ -90,7 +95,7 @@ export class AgentService {
 		});
 
 		try {
-			const result = await this.adapter.sendUserMessage(sessionId, message);
+			const result = await this.adapter.sendUserMessage(sessionId, message, images);
 			await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
 			await this.writeAudit({
 				sessionId,
@@ -633,7 +638,9 @@ export class AgentService {
 			"",
 			"## 当前工作区",
 			`- 路径：${workspacePath || "未选择"}`,
-			"- 如果用户要求读取或分析文件，优先基于当前工作区内的文件路径执行。",
+			"- 工作区只是默认工作目录；未选择工作区不代表不能处理用户提供的附件或绝对路径文件。",
+			"- 如果用户消息、附件清单或上下文中提供了绝对路径或可访问路径，优先使用现有 Pi 工具读取该路径，不要要求用户先选择工作区。",
+			"- 只有在需要创建/写入文件且无法从用户要求、附件路径或上下文推断输出目录时，才要求用户选择工作区或指定输出位置。",
 			"- 不要声称已经读取未实际读取的文件；依据不足时说明需要用户选择文件或补充材料。",
 			"",
 			"## 已绑定业务能力",

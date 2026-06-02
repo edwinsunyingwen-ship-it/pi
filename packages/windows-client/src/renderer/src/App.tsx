@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import type {
   AgentConfig,
+  AgentImageContent,
   ConversationStoreState,
   AgentRuleConfig,
   AgentSession,
@@ -42,6 +43,7 @@ import type {
   CapabilityExecutionMode,
   ClientConfig,
   ClientConfigState,
+  ConversationAttachmentMeta,
   ModelInputCapability,
   ModelProfileConfig,
   ModelSetupMode,
@@ -59,6 +61,7 @@ interface TranscriptItem {
   role: 'user' | 'assistant';
   text: string;
   createdAt: string;
+  attachments?: ConversationAttachmentMeta[];
 }
 
 interface LocalNotice {
@@ -145,9 +148,12 @@ interface ComposerAttachment {
   name: string;
   type: string;
   size: number;
-  kind: 'image' | 'text' | 'file';
+  kind: 'image' | 'text' | 'document' | 'file';
   content: string;
   truncated: boolean;
+  readable: boolean;
+  sourcePath?: string;
+  previewDataUrl?: string;
 }
 
 const auditActionLabels: Record<string, string> = {
@@ -407,6 +413,15 @@ function isTextAttachment(file: File): boolean {
   return textAttachmentExtensions.has(getFileExtension(file.name));
 }
 
+function isPdfAttachment(file: File): boolean {
+  return file.type === 'application/pdf' || getFileExtension(file.name) === 'pdf';
+}
+
+function getFileSourcePath(file: File): string | undefined {
+  const candidate = window.windowsClient.getFilePath(file) || (file as File & { path?: string }).path;
+  return candidate?.trim() || undefined;
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -421,15 +436,20 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 async function createComposerAttachment(file: File): Promise<ComposerAttachment> {
+  const sourcePath = getFileSourcePath(file);
   if (file.type.startsWith('image/')) {
+    const content = await readFileAsDataUrl(file);
     return {
       id: crypto.randomUUID(),
       name: file.name || 'pasted-image',
       type: file.type || 'image/*',
       size: file.size,
       kind: 'image',
-      content: await readFileAsDataUrl(file),
+      content,
       truncated: false,
+      readable: true,
+      sourcePath,
+      previewDataUrl: content,
     };
   }
 
@@ -444,6 +464,22 @@ async function createComposerAttachment(file: File): Promise<ComposerAttachment>
       kind: 'text',
       content: truncated ? text.slice(0, maxAttachmentTextLength) : text,
       truncated,
+      readable: true,
+      sourcePath,
+    };
+  }
+
+  if (isPdfAttachment(file)) {
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: 'application/pdf',
+      size: file.size,
+      kind: 'document',
+      content: '',
+      truncated: false,
+      readable: Boolean(sourcePath),
+      sourcePath,
     };
   }
 
@@ -455,30 +491,85 @@ async function createComposerAttachment(file: File): Promise<ComposerAttachment>
     kind: 'file',
     content: '',
     truncated: false,
+    readable: false,
+    sourcePath,
   };
 }
 
 function formatAttachmentForPrompt(attachment: ComposerAttachment, index: number): string {
-  const header = `附件 ${index + 1}: ${attachment.name} (${attachment.type || 'unknown'}, ${formatBytes(attachment.size)})`;
+  const header = `Attachment ${index + 1}: ${attachment.name} (${attachment.type || 'unknown'}, ${formatBytes(attachment.size)})`;
+  const sourcePathLine = attachment.sourcePath
+    ? `\npath: ${attachment.sourcePath}`
+    : '\npath: unavailable; use the inline content or image payload if present';
   if (attachment.kind === 'image') {
-    return `${header}\n类型: image\n内容: ${attachment.content}`;
+    return `${header}${sourcePathLine}\nkind: image\ncontent: provided through the message image input channel. If a path is present, existing Pi tools may also read it by absolute path.`;
   }
   if (attachment.kind === 'text') {
-    return `${header}${attachment.truncated ? '\n说明: 内容过长，已截取前 30000 个字符。' : ''}\n内容:\n${attachment.content}`;
+    if (attachment.sourcePath) {
+      return `${header}${sourcePathLine}\nkind: text\ncontent: not inlined because the file is accessible by path. Use existing Pi tools such as read when the task needs the file contents.`;
+    }
+    return `${header}${sourcePathLine}\nkind: text\ncontent: inlined because no local path is available.${attachment.truncated ? '\nnote: content was truncated to the first 30000 characters.' : ''}\n\n${attachment.content}`;
   }
-  return `${header}\n说明: 已作为相关文件附加；当前版本无法直接提取该二进制文档正文，请根据文件名、类型和用户说明处理。`;
+  if (attachment.kind === 'document') {
+    return `${header}${sourcePathLine}\nkind: document\ncontent: not inlined. Use the available path and existing Pi tools/commands to inspect or extract document text when needed.`;
+  }
+  return `${header}${sourcePathLine}\nkind: file\ncontent: not inlined. If a path is present, use existing Pi tools/commands when the task needs this file.`;
 }
 
-function buildMessageWithAttachments(message: string, attachments: ComposerAttachment[]): string {
+function buildMessageWithAttachments(message: string, attachments: ComposerAttachment[], workspacePath: string | null): string {
   if (attachments.length === 0) {
     return message;
   }
   return [
     message,
     '',
-    '相关附件:',
+    '<client_attachment_manifest>',
+    'The user attached files to this conversation. Treat this as internal context and do not repeat the manifest verbatim to the user.',
+    'Use existing Pi tools such as read and bash to inspect attached files by absolute path when the task needs file contents.',
+    'Do not require a workspace merely to read or analyze an attached file. Workspace selection is only needed when no output location can be inferred or when writing files requires a target directory.',
+    'If the user asks to write output in the same directory as an attachment and that attachment has a path, use the attachment path directory as the intended output directory.',
+    `Current workspace: ${workspacePath ?? 'not selected'}`,
+    '',
     attachments.map((attachment, index) => formatAttachmentForPrompt(attachment, index)).join('\n\n'),
+    '</client_attachment_manifest>',
   ].join('\n');
+}
+
+function buildTranscriptMessageWithAttachments(message: string, attachments: ComposerAttachment[]): string {
+  return message || (attachments.length > 0 ? '已发送附件' : '');
+}
+
+function dataUrlToImageContent(dataUrl: string, fallbackMimeType: string): AgentImageContent | null {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    type: 'image',
+    mimeType: match[1] || fallbackMimeType,
+    data: match[2],
+  };
+}
+
+function buildAttachmentImages(attachments: ComposerAttachment[]): AgentImageContent[] {
+  return attachments
+    .filter((attachment) => attachment.kind === 'image')
+    .map((attachment) => dataUrlToImageContent(attachment.content, attachment.type))
+    .filter((image): image is AgentImageContent => Boolean(image));
+}
+
+function toConversationAttachmentMeta(attachment: ComposerAttachment): ConversationAttachmentMeta {
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.type,
+    size: attachment.size,
+    kind: attachment.kind,
+    sourcePath: attachment.sourcePath,
+    readable: attachment.readable,
+    truncated: attachment.truncated,
+    previewDataUrl: attachment.previewDataUrl,
+  };
 }
 
 function createCapabilityId(): string {
@@ -935,6 +1026,45 @@ function renderMarkdownBlocks(tokens: Token[], searchQuery?: string): ReactNode[
 function MarkdownMessage({ text, searchQuery }: { text: string; searchQuery?: string }): ReactElement {
   const tokens = useMemo(() => marked.lexer(text, { breaks: true, gfm: true }), [text]);
   return <div className="markdown-message">{renderMarkdownBlocks(tokens, searchQuery)}</div>;
+}
+
+function AttachmentList({ attachments }: { attachments?: ConversationAttachmentMeta[] }): ReactElement | null {
+  if (!attachments || attachments.length === 0) {
+    return null;
+  }
+  return (
+    <div className="message-attachment-list">
+      {attachments.map((attachment) => (
+        <details className="message-attachment-card" key={attachment.id}>
+          <summary>
+            {attachment.previewDataUrl ? (
+              <img src={attachment.previewDataUrl} alt="" className="message-attachment-preview" />
+            ) : (
+              <FileText size={18} />
+            )}
+            <span className="message-attachment-main">
+              <strong>{attachment.name}</strong>
+              <small>
+                {formatBytes(attachment.size)} ·{' '}
+                {attachment.sourcePath ? '有本地路径' : attachment.readable ? '内容已随消息提供' : '仅记录附件'}
+                {attachment.truncated ? ' · 已截断' : ''}
+              </small>
+            </span>
+          </summary>
+          <dl>
+            <div>
+              <dt>类型</dt>
+              <dd>{attachment.mimeType || 'unknown'}</dd>
+            </div>
+            <div>
+              <dt>来源路径</dt>
+              <dd>{attachment.sourcePath || '无本地路径'}</dd>
+            </div>
+          </dl>
+        </details>
+      ))}
+    </div>
+  );
 }
 
 function createDefaultAuditQuery(): AuditLogQuery {
@@ -2528,7 +2658,10 @@ function App(): ReactElement {
       return;
     }
     const attachmentsToSend = composerAttachments;
-    const outboundMessage = buildMessageWithAttachments(message, attachmentsToSend);
+    const outboundMessage = buildMessageWithAttachments(message, attachmentsToSend, activeWorkspace.path);
+    const transcriptMessage = buildTranscriptMessageWithAttachments(message, attachmentsToSend);
+    const attachmentImages = buildAttachmentImages(attachmentsToSend);
+    const transcriptAttachments = attachmentsToSend.map((attachment) => toConversationAttachmentMeta(attachment));
     let messageSession = session;
     const messageConversation = selectedConversation;
     if (!messageSession || messageSession.state === 'stopped') {
@@ -2538,7 +2671,12 @@ function App(): ReactElement {
       }
     }
 
-    const userItem: TranscriptItem = { role: 'user', text: outboundMessage, createdAt: new Date().toISOString() };
+    const userItem: TranscriptItem = {
+      role: 'user',
+      text: transcriptMessage,
+      createdAt: new Date().toISOString(),
+      attachments: transcriptAttachments,
+    };
     const userTranscript = [...transcript, userItem];
     const nextTitle =
       transcript.length === 0 && isDefaultConversationTitle(messageConversation.title, messageAgent)
@@ -2553,7 +2691,7 @@ function App(): ReactElement {
     clearCurrentConversationAttachments(messageConversation.id);
     setStatusText('正在通过适配器发送消息');
 
-    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage);
+    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage, attachmentImages);
     const assistantTranscript = [
       ...userTranscript,
       { role: 'assistant' as const, text: result.responseText, createdAt: result.createdAt },
@@ -3132,6 +3270,7 @@ function App(): ReactElement {
                             <time dateTime={item.createdAt}>{formatLocalTimestamp(item.createdAt)}</time>
                           </div>
                           <MarkdownMessage text={item.text} searchQuery={isSearchTarget ? targetQuery : undefined} />
+                          <AttachmentList attachments={item.attachments} />
                         </div>
                       );
                     })
@@ -3448,6 +3587,7 @@ function App(): ReactElement {
                     <div className={`message-bubble ${item.role}`} key={`${item.createdAt}-${item.role}`}>
                       <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
                       <MarkdownMessage text={item.text} />
+                      <AttachmentList attachments={item.attachments} />
                     </div>
                   ))
                 )}

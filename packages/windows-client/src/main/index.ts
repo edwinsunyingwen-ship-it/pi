@@ -5,6 +5,7 @@ import { IPC_CHANNELS } from "../shared/ipc";
 import type {
 	AgentConfig,
 	AgentCoreConfig,
+	AgentImageContent,
 	AppEnvironment,
 	AuditLogQuery,
 	CapabilityConfig,
@@ -133,8 +134,10 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.agentGetSessionState, (_event, sessionId: string) =>
 		agentService.getSessionState(sessionId),
 	);
-	ipcMain.handle(IPC_CHANNELS.agentSendUserMessage, (_event, sessionId: string, message: string) =>
-		agentService.sendUserMessage(sessionId, message),
+	ipcMain.handle(
+		IPC_CHANNELS.agentSendUserMessage,
+		(_event, sessionId: string, message: string, images?: AgentImageContent[]) =>
+			agentService.sendUserMessage(sessionId, message, images),
 	);
 	ipcMain.handle(IPC_CHANNELS.agentListAvailableTools, () => agentService.listAvailableTools());
 }

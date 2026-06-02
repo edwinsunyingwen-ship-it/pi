@@ -57,10 +57,29 @@ export interface AgentMessageResult {
 	capabilityCalls?: AgentCapabilityCallLog[];
 }
 
+export interface AgentImageContent {
+	type: "image";
+	data: string;
+	mimeType: string;
+}
+
+export interface ConversationAttachmentMeta {
+	id: string;
+	name: string;
+	mimeType: string;
+	size: number;
+	kind: "image" | "text" | "document" | "file";
+	sourcePath?: string;
+	readable: boolean;
+	truncated: boolean;
+	previewDataUrl?: string;
+}
+
 export interface ConversationTranscriptItem {
 	role: "user" | "assistant";
 	text: string;
 	createdAt: string;
+	attachments?: ConversationAttachmentMeta[];
 }
 
 export interface StoredAgentConversation {
@@ -365,6 +384,11 @@ export interface WindowsClientApi {
 	startAgentSession: (agentId?: string, workspacePath?: string | null) => Promise<AgentSession>;
 	stopAgentSession: (sessionId: string) => Promise<AgentSession>;
 	getAgentSessionState: (sessionId: string) => Promise<AgentSession | null>;
-	sendAgentUserMessage: (sessionId: string, message: string) => Promise<AgentMessageResult>;
+	getFilePath: (file: File) => string;
+	sendAgentUserMessage: (
+		sessionId: string,
+		message: string,
+		images?: AgentImageContent[],
+	) => Promise<AgentMessageResult>;
 	listAvailableTools: () => Promise<AgentToolInfo[]>;
 }

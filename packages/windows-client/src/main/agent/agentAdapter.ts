@@ -7,6 +7,7 @@ import { StringDecoder } from "node:string_decoder";
 import { app } from "electron";
 import type {
 	AgentCapabilityCallLog,
+	AgentImageContent,
 	AgentMessageResult,
 	AgentSession,
 	AgentToolInfo,
@@ -70,7 +71,7 @@ type RpcEvent = {
 
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
-	sendUserMessage(sessionId: string, message: string): Promise<AgentMessageResult>;
+	sendUserMessage(sessionId: string, message: string, images?: AgentImageContent[]): Promise<AgentMessageResult>;
 	stopSession(sessionId: string): Promise<AgentSession>;
 	getSessionState(sessionId: string): Promise<AgentSession | null>;
 	listAvailableTools(): Promise<AgentToolInfo[]>;
@@ -155,7 +156,11 @@ export class RpcAgentAdapter implements AgentAdapter {
 		return session;
 	}
 
-	async sendUserMessage(sessionId: string, message: string): Promise<AgentMessageResult> {
+	async sendUserMessage(
+		sessionId: string,
+		message: string,
+		images?: AgentImageContent[],
+	): Promise<AgentMessageResult> {
 		const state = this.sessions.get(sessionId);
 		if (!state) {
 			throw new Error(`Agent session not found: ${sessionId}`);
@@ -165,7 +170,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 
 		state.events = [];
 		const waitForEnd = this.waitForAgentEnd(state);
-		await this.sendCommand(state, { type: "prompt", message });
+		await this.sendCommand(state, { type: "prompt", message, images });
 		const events = await waitForEnd;
 		const assistantError = this.extractAssistantError(events);
 		if (assistantError) {
