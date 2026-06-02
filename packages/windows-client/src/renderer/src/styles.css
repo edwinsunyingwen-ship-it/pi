@@ -2124,6 +2124,16 @@ dd {
   word-break: break-word;
 }
 
+.audit-detail-path {
+  border-top: 1px solid #ebe4db;
+  color: #667085;
+  flex: 0 0 auto;
+  font-size: 0.84rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 12px 20px 16px;
+}
+
 .modal-actions {
   align-items: center;
   background: #fffdfa;

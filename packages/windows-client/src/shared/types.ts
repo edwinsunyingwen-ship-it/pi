@@ -11,6 +11,8 @@ export interface AuditLogEntry {
 	businessAction: string;
 	inputSummary?: string;
 	outputSummary?: string;
+	fullInput?: string;
+	fullOutput?: string;
 	filesRead?: string[];
 	filesCreated?: string[];
 	filesEdited?: string[];

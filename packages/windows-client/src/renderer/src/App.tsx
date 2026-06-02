@@ -798,10 +798,39 @@ function getAuditContent(entry: AuditLogEntry): string {
   return entry.outputSummary ?? entry.inputSummary ?? entry.errorMessage ?? entry.toolName;
 }
 
+function getAuditFullContent(entry: AuditLogEntry): string {
+  const sections: string[] = [];
+  const input = entry.fullInput ?? entry.inputSummary;
+  const output = entry.fullOutput ?? entry.outputSummary;
+  if (input) {
+    sections.push(`输入：\n${input}`);
+  }
+  if (output) {
+    sections.push(`输出：\n${output}`);
+  }
+  if (entry.errorMessage) {
+    sections.push(`错误：\n${entry.errorMessage}`);
+  }
+  return sections.join('\n\n') || entry.toolName;
+}
+
+function hasAuditFullContent(entry: AuditLogEntry): boolean {
+  return Boolean(entry.fullInput || entry.fullOutput || entry.errorMessage);
+}
+
 function getAuditContentPreview(content: string): string {
   return content.length > auditContentPreviewMaxLength
     ? `${content.slice(0, auditContentPreviewMaxLength).trimEnd()}...`
     : content;
+}
+
+function getAuditEntryLogFilePath(logsDirectory: string | null, entry: AuditLogEntry): string | null {
+  if (!logsDirectory) {
+    return null;
+  }
+  const separator = logsDirectory.includes('\\') ? '\\' : '/';
+  const base = logsDirectory.endsWith('\\') || logsDirectory.endsWith('/') ? logsDirectory.slice(0, -1) : logsDirectory;
+  return `${base}${separator}audit-${entry.timestamp.slice(0, 10)}.jsonl`;
 }
 
 function getMessageAnchorId(conversationId: string, messageIndex: number): string {
@@ -4319,7 +4348,10 @@ function App(): ReactElement {
                   </div>
                   {auditEntries.map((entry, index) => {
                     const content = getAuditContent(entry);
-                    const isLongContent = content.length > auditContentPreviewMaxLength;
+                    const isLongContent =
+                      content.length > auditContentPreviewMaxLength ||
+                      getAuditFullContent(entry).length > auditContentPreviewMaxLength;
+                    const canInspectFullContent = isLongContent || hasAuditFullContent(entry);
 
                     return (
                       <div className="audit-row" key={`${entry.timestamp}-${entry.businessAction}-${entry.toolName}-${index}`}>
@@ -4328,13 +4360,13 @@ function App(): ReactElement {
                         <span>{getAuditEndTime(entry) ? formatLocalTimestamp(getAuditEndTime(entry) as string) : '-'}</span>
                         <div className="audit-content-cell">
                           <p className="audit-content-preview">{getAuditContentPreview(content)}</p>
-                          {isLongContent && (
+                          {canInspectFullContent && (
                             <button
                               type="button"
                               className="audit-more-button"
                               onClick={() => setExpandedAuditEntry(entry)}
                             >
-                              查看更多
+                              查看全部
                             </button>
                           )}
                         </div>
@@ -4428,7 +4460,12 @@ function App(): ReactElement {
                 {expandedAuditEntry.status === 'success' ? '成功' : '失败'}
               </small>
             </div>
-            <pre className="audit-detail-content">{getAuditContent(expandedAuditEntry)}</pre>
+            <pre className="audit-detail-content">{getAuditFullContent(expandedAuditEntry)}</pre>
+            {getAuditEntryLogFilePath(auditPath, expandedAuditEntry) && (
+              <p className="audit-detail-path">
+                完整日志文件：{getAuditEntryLogFilePath(auditPath, expandedAuditEntry)}
+              </p>
+            )}
           </section>
         </div>
       )}

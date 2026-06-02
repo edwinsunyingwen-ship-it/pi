@@ -115,6 +115,8 @@ export class AuditLogger {
 			entry.workspacePath,
 			entry.inputSummary,
 			entry.outputSummary,
+			entry.fullInput,
+			entry.fullOutput,
 			entry.errorMessage,
 		]
 			.filter(Boolean)

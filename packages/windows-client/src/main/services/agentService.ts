@@ -339,6 +339,8 @@ export class AgentService {
 		operationEndedAt?: string;
 		inputSummary?: string;
 		outputSummary?: string;
+		fullInput?: string;
+		fullOutput?: string;
 		status: AuditStatus;
 		errorMessage?: string;
 	}): Promise<void> {
@@ -353,6 +355,8 @@ export class AgentService {
 			businessAction: options.businessAction,
 			inputSummary: options.inputSummary,
 			outputSummary: options.outputSummary,
+			fullInput: options.fullInput,
+			fullOutput: options.fullOutput,
 			batch: false,
 			status: options.status,
 			errorMessage: options.errorMessage,
@@ -373,23 +377,28 @@ export class AgentService {
 
 		for (const call of calls) {
 			const matchedCapability = this.findMatchingCapability(call, enabledCapabilities);
-			const displayName = this.getCapabilityDisplayName(call, matchedCapability);
-			const toolMeta = this.getCapabilityToolMeta(call, matchedCapability);
+			const capabilityMeta = this.getCapabilityMeta(call, matchedCapability);
+			const callSummary = capabilityMeta.join("；");
 			if (call.inputSummary) {
+				const input = this.redactSensitive(call.inputSummary);
 				await this.writeAudit({
 					sessionId,
 					toolName: call.toolName,
 					businessAction: "capability-invoked",
 					operationStartedAt: call.startedAt,
-					inputSummary: this.truncate(this.redactSensitive(call.inputSummary), 500),
-					outputSummary: `调用能力：${displayName}；${toolMeta}`,
+					inputSummary: this.truncate(input, 500),
+					outputSummary: callSummary,
+					fullInput: input,
+					fullOutput: callSummary,
 					status: "success",
 				});
 			}
 
 			const resultSummary = this.redactSensitive(
-				call.outputSummary || `能力 ${displayName} 已执行，但没有返回可展示内容。`,
+				call.outputSummary ||
+					`能力 ${capabilityMeta[0]?.replace(/^能力：/, "") || "未知能力"} 已执行，但没有返回可展示内容。`,
 			);
+			const resultOutput = `${callSummary}；返回：${resultSummary}`;
 			await this.writeAudit({
 				sessionId,
 				toolName: call.toolName,
@@ -397,7 +406,9 @@ export class AgentService {
 				operationStartedAt: call.startedAt,
 				operationEndedAt: call.endedAt,
 				inputSummary: call.inputSummary ? this.truncate(this.redactSensitive(call.inputSummary), 240) : undefined,
-				outputSummary: this.truncate(`${toolMeta}；返回：${resultSummary}`, 500),
+				outputSummary: this.truncate(resultOutput, 500),
+				fullInput: call.inputSummary ? this.redactSensitive(call.inputSummary) : undefined,
+				fullOutput: resultOutput,
 				status: call.status,
 				errorMessage:
 					call.status === "failure"
@@ -408,21 +419,25 @@ export class AgentService {
 	}
 
 	private getCapabilityDisplayName(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string {
-		const name = capability?.name || call.toolName || call.toolCallId || "未知能力";
-		return call.toolCallId ? `${name}（${call.toolCallId}）` : name;
+		return capability?.name || call.toolName || call.toolCallId || "未知能力";
 	}
 
-	private getCapabilityToolMeta(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string {
+	private getCapabilityMeta(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string[] {
 		const type = capability ? this.getCapabilityTypeLabel(capability) : this.getBuiltinToolType(call.toolName);
 		const execution = capability ? this.getCapabilityExecutionLabel(capability) : "Pi 内置工具";
-		const parts = [`工具：${call.toolName || "未知工具"}`, `类型：${type}`, `执行方式：${execution}`];
+		const parts = [
+			`能力：${this.getCapabilityDisplayName(call, capability)}`,
+			`工具：${call.toolName || "未知工具"}`,
+			`类型：${type}`,
+			`执行方式：${execution}`,
+		];
 		if (call.toolCallId) {
 			parts.push(`调用ID：${call.toolCallId}`);
 		}
 		if (capability?.mcpServerName) {
 			parts.push(`MCP：${capability.mcpServerName}`);
 		}
-		return parts.join("；");
+		return parts;
 	}
 
 	private getBuiltinToolType(toolName: string): string {
