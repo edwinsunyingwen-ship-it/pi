@@ -9,7 +9,125 @@
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dist": "npm run build && electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "works.earendil.pi.windows-client",
+    "productName": "Pi Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../package.json",
+        "to": "pi-runtime/package.json"
+      },
+      {
+        "from": "../../node_modules",
+        "to": "pi-runtime/node_modules",
+        "filter": [
+          "**/*",
+          "!@earendil-works/**",
+          "!@pi-agent/**",
+          "!pi-extension-*/**",
+          "!pi-web-ui-example/**"
+        ]
+      },
+      {
+        "from": "../../packages/agent/dist",
+        "to": "pi-runtime/packages/agent/dist"
+      },
+      {
+        "from": "../../packages/agent/package.json",
+        "to": "pi-runtime/packages/agent/package.json"
+      },
+      {
+        "from": "../../packages/agent/dist",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-agent-core/dist"
+      },
+      {
+        "from": "../../packages/agent/package.json",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-agent-core/package.json"
+      },
+      {
+        "from": "../../packages/ai/dist",
+        "to": "pi-runtime/packages/ai/dist"
+      },
+      {
+        "from": "../../packages/ai/package.json",
+        "to": "pi-runtime/packages/ai/package.json"
+      },
+      {
+        "from": "../../packages/ai/dist",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-ai/dist"
+      },
+      {
+        "from": "../../packages/ai/package.json",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-ai/package.json"
+      },
+      {
+        "from": "../../packages/coding-agent/dist",
+        "to": "pi-runtime/packages/coding-agent/dist"
+      },
+      {
+        "from": "../../packages/coding-agent/package.json",
+        "to": "pi-runtime/packages/coding-agent/package.json"
+      },
+      {
+        "from": "../../packages/coding-agent/dist",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-coding-agent/dist"
+      },
+      {
+        "from": "../../packages/coding-agent/package.json",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-coding-agent/package.json"
+      },
+      {
+        "from": "../../packages/tui/dist",
+        "to": "pi-runtime/packages/tui/dist"
+      },
+      {
+        "from": "../../packages/tui/package.json",
+        "to": "pi-runtime/packages/tui/package.json"
+      },
+      {
+        "from": "../../packages/tui/dist",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-tui/dist"
+      },
+      {
+        "from": "../../packages/tui/package.json",
+        "to": "pi-runtime/node_modules/@earendil-works/pi-tui/package.json"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pi Agent",
+      "customNsisBinary": {
+        "url": "https://repo.huaweicloud.com/repository/toolkit/electron-builder-binaries/nsis-3.0.4.1/nsis-3.0.4.1.7z",
+        "checksum": "VKMiizYdmNdJOWpRGz4trl4lD++BvYP2irAXpMilheUP0pc93iKlWAoP843Vlraj8YG19CVn0j+dCo/hURz9+Q==",
+        "version": "3.0.4.1"
+      },
+      "customNsisResources": {
+        "url": "https://repo.huaweicloud.com/repository/toolkit/electron-builder-binaries/nsis-resources-3.4.1/nsis-resources-3.4.1.7z",
+        "checksum": "Dqd6g+2buwwvoG1Vyf6BHR1b+25QMmPcwZx40atOT57gH27rkjOei1L0JTldxZu4NFoEmW4kJgZ3DlSWVON3+Q==",
+        "version": "3.4.1"
+      }
+    }
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -22,7 +140,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "electron": "^38.0.0",
+    "electron": "38.8.6",
+    "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.0",
     "vite": "^7.0.0",
     "typescript": "^5.9.0"

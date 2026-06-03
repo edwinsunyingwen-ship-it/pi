@@ -266,22 +266,23 @@ export class RpcAgentAdapter implements AgentAdapter {
 			args.push("--extension", browserExtensionPath);
 		}
 
-		const command = process.env.PI_WINDOWS_CLIENT_NODE_PATH || "node";
-		const commandArgs =
-			process.env.NODE_ENV === "development"
-				? [
-						join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs"),
-						"--tsconfig",
-						join(projectRoot, "tsconfig.json"),
-						sourceCli,
-						...args,
-					]
-				: [builtCli, ...args];
+		const isDevelopment = process.env.NODE_ENV === "development";
+		const command = process.env.PI_WINDOWS_CLIENT_NODE_PATH || (isDevelopment ? "node" : process.execPath);
+		const commandArgs = isDevelopment
+			? [
+					join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+					"--tsconfig",
+					join(projectRoot, "tsconfig.json"),
+					sourceCli,
+					...args,
+				]
+			: [builtCli, ...args];
 
 		return spawn(command, commandArgs, {
 			cwd: options.cwd ?? projectRoot,
 			env: {
 				...process.env,
+				...(isDevelopment ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
 				PI_CODING_AGENT_DIR: agentDir,
 				PI_CODING_AGENT_SESSION_DIR: join(agentDir, "sessions"),
 			},
@@ -291,14 +292,19 @@ export class RpcAgentAdapter implements AgentAdapter {
 	}
 
 	private findProjectRoot(): string {
-		const candidates = [process.cwd(), app.getAppPath(), dirname(app.getAppPath())];
+		const candidates = [
+			process.cwd(),
+			app.getAppPath(),
+			dirname(app.getAppPath()),
+			join(process.resourcesPath, "pi-runtime"),
+		];
 		for (const candidate of candidates) {
 			let current = resolve(candidate);
 			while (true) {
-				if (
-					existsSync(join(current, "package.json")) &&
-					existsSync(join(current, "packages", "coding-agent", "src", "cli.ts"))
-				) {
+				const hasPackageJson = existsSync(join(current, "package.json"));
+				const hasSourceCli = existsSync(join(current, "packages", "coding-agent", "src", "cli.ts"));
+				const hasBuiltCli = existsSync(join(current, "packages", "coding-agent", "dist", "cli.js"));
+				if (hasPackageJson && (hasSourceCli || hasBuiltCli)) {
 					return current;
 				}
 				const parent = dirname(current);
