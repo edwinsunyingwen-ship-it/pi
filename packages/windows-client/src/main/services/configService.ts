@@ -318,6 +318,7 @@ export class ConfigService {
 					description: "系统内置默认主智能体，可关联模型与业务能力后启动会话。",
 					rules: this.createDefaultAgentRules(),
 					taskTemplates: [],
+					knowledgeItems: [],
 					type: "primary",
 					parentAgentIds: [],
 					childAgentIds: [],
@@ -661,6 +662,7 @@ export class ConfigService {
 							description: "系统内置默认主智能体，可关联模型与业务能力后启动会话。",
 							rules: this.createDefaultAgentRules(),
 							taskTemplates: [],
+							knowledgeItems: [],
 							type: "primary" as const,
 							parentAgentIds: [],
 							childAgentIds: [],
@@ -702,6 +704,20 @@ export class ConfigService {
 					expectedInputs: template.expectedInputs ?? "",
 					enabled: template.enabled ?? true,
 				})),
+				knowledgeItems: (agent.knowledgeItems ?? [])
+					.map((item) => ({
+						id: item.id || crypto.randomUUID(),
+						title: item.title?.trim() || "未命名知识",
+						type: item.type === "document" ? ("document" as const) : ("text" as const),
+						overview: item.overview?.trim() ?? "",
+						content: item.content ?? "",
+						filePath: item.filePath?.trim() ?? "",
+					}))
+					.filter((item) =>
+						item.type === "document"
+							? item.overview.length > 0 && item.filePath.length > 0
+							: item.content.trim().length > 0,
+					),
 				type,
 				parentAgentIds: type === "sub" ? (agent.parentAgentIds ?? []).filter((id) => knownAgentIds.has(id)) : [],
 				childAgentIds: (agent.childAgentIds ?? []).filter((id) => knownAgentIds.has(id) && id !== agent.id),

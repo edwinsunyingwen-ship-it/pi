@@ -31,6 +31,7 @@ import {
 import type {
   AgentConfig,
   AgentImageContent,
+  AgentKnowledgeItem,
   ConversationStoreState,
   AgentRuleConfig,
   AgentSession,
@@ -645,6 +646,7 @@ function createAgentConfig(): AgentConfig {
       terminology: '',
     },
     taskTemplates: [],
+    knowledgeItems: [],
     type: 'primary',
     parentAgentIds: [],
     childAgentIds: [],
@@ -654,6 +656,17 @@ function createAgentConfig(): AgentConfig {
     maxDelegationDepth: 3,
     enabled: true,
     notes: '',
+  };
+}
+
+function createAgentKnowledgeItem(type: AgentKnowledgeItem['type'] = 'text'): AgentKnowledgeItem {
+  return {
+    id: crypto.randomUUID(),
+    title: '',
+    type,
+    overview: '',
+    content: '',
+    filePath: '',
   };
 }
 
@@ -762,6 +775,29 @@ function formatModelName(model: ModelProfileConfig | undefined | null): string {
   const provider = model.providerLabel || model.provider || '未知 Provider';
   const modelId = model.modelId || model.displayName || model.id;
   return `${provider} / ${modelId}`;
+}
+
+function getKnowledgeSummary(item: AgentKnowledgeItem): string {
+  return item.type === 'document' ? item.overview : item.content;
+}
+
+function truncateInlineText(value: string, maxLength = 120): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
+}
+
+function formatKnowledgeContextPreview(items: AgentKnowledgeItem[] | undefined): string[] {
+  if (!items?.length) {
+    return ['知识：未配置'];
+  }
+  return [
+    '知识：',
+    ...items.map((item) => {
+      if (item.type === 'document') {
+        return `- ${item.title || '未命名知识'}（文档）：路径：${item.filePath || '未选择'}；概述：${item.overview || '未填写'}`;
+      }
+      return `- ${item.title || '未命名知识'}（纯文本）：\n${item.content || '未填写'}`;
+    }),
+  ];
 }
 
 function padDatePart(value: number): string {
@@ -1257,6 +1293,8 @@ function App(): ReactElement {
   const [capabilityPageInput, setCapabilityPageInput] = useState('1');
   const [auditPageInput, setAuditPageInput] = useState('1');
   const [agentEditor, setAgentEditor] = useState<AgentConfig | null>(null);
+  const [agentKnowledgeEditor, setAgentKnowledgeEditor] = useState<AgentKnowledgeItem | null>(null);
+  const [agentKnowledgeViewer, setAgentKnowledgeViewer] = useState<AgentKnowledgeItem | null>(null);
   const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
   const [renamingConversation, setRenamingConversation] = useState<AgentConversationState | null>(null);
   const [renameConversationTitle, setRenameConversationTitle] = useState('');
@@ -1264,6 +1302,7 @@ function App(): ReactElement {
   const [openAppMenu, setOpenAppMenu] = useState<AppMenuName | null>(null);
   const [attachmentsByConversationId, setAttachmentsByConversationId] = useState<Record<string, ComposerAttachment[]>>({});
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
+  const knowledgeFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     void refreshInitialState();
@@ -1867,6 +1906,20 @@ function App(): ReactElement {
           : agent.modelIds[0],
       parentAgentIds: agent.type === 'sub' ? agent.parentAgentIds : [],
       childAgentIds: agent.childAgentIds.filter((id) => id !== agent.id),
+      knowledgeItems: agent.knowledgeItems
+        .map((item) => ({
+          ...item,
+          title: item.title.trim(),
+          overview: item.overview.trim(),
+          content: item.type === 'text' ? item.content.trim() : item.content,
+          filePath: item.type === 'document' ? item.filePath.trim() : '',
+        }))
+        .filter((item) =>
+          item.title &&
+          (item.type === 'document'
+            ? item.overview.length > 0 && item.filePath.length > 0
+            : item.content.length > 0),
+        ),
     };
     setStatusText(`正在保存智能体：${normalizedAgent.name}`);
     const nextConfig = await window.windowsClient.saveAgentConfig(normalizedAgent);
@@ -2430,6 +2483,85 @@ function App(): ReactElement {
     );
   }
 
+  function addAgentKnowledgeItem(): void {
+    setAgentKnowledgeEditor(createAgentKnowledgeItem());
+  }
+
+  function selectAgentKnowledgeFile(event: ChangeEvent<HTMLInputElement>): void {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const filePath = window.windowsClient.getFilePath(file);
+    setAgentKnowledgeEditor((item) =>
+      item
+        ? {
+            ...item,
+            filePath,
+            title: item.title || file.name,
+          }
+        : item,
+    );
+    event.target.value = '';
+  }
+
+  function saveAgentKnowledgeItem(item: AgentKnowledgeItem): void {
+    const title = item.title.trim();
+    const overview = item.overview.trim();
+    const content = item.content.trim();
+    const filePath = item.filePath.trim();
+    if (!title) {
+      setConfigNotice({ tone: 'error', text: '知识标题不能为空。' });
+      return;
+    }
+    if (item.type === 'document' && !filePath) {
+      setConfigNotice({ tone: 'error', text: '文档类型的知识需要选择本地文件。' });
+      return;
+    }
+    if (item.type === 'document' && !overview) {
+      setConfigNotice({ tone: 'error', text: '文档类型的知识需要填写概述。' });
+      return;
+    }
+    if (item.type === 'text' && !content) {
+      setConfigNotice({ tone: 'error', text: '纯文本类型的知识需要填写内容。' });
+      return;
+    }
+
+    const normalizedItem: AgentKnowledgeItem = {
+      ...item,
+      title,
+      overview,
+      content: item.type === 'document' ? item.content : content,
+      filePath: item.type === 'document' ? filePath : '',
+    };
+    setAgentEditor((agent) => {
+      if (!agent) {
+        return agent;
+      }
+      const exists = agent.knowledgeItems.some((knowledge) => knowledge.id === normalizedItem.id);
+      return {
+        ...agent,
+        knowledgeItems: exists
+          ? agent.knowledgeItems.map((knowledge) =>
+              knowledge.id === normalizedItem.id ? normalizedItem : knowledge,
+            )
+          : [...agent.knowledgeItems, normalizedItem],
+      };
+    });
+    setAgentKnowledgeEditor(null);
+  }
+
+  function deleteAgentKnowledgeItem(itemId: string): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            knowledgeItems: agent.knowledgeItems.filter((item) => item.id !== itemId),
+          }
+        : agent,
+    );
+  }
+
   function toggleAgentModel(modelId: string, checked: boolean): void {
     setAgentEditor((agent) => {
       if (!agent) {
@@ -2802,6 +2934,7 @@ function App(): ReactElement {
       `绑定能力：${capabilityNames.length > 0 ? capabilityNames.join('、') : '未绑定'}`,
       `子智能体：${childAgentNames.length > 0 ? childAgentNames.join('、') : '未配置'}`,
       `常规任务：${taskNames.length > 0 ? taskNames.join('、') : '未配置'}`,
+      ...formatKnowledgeContextPreview(selectedAgent?.knowledgeItems),
       selectedFile ? `当前预览文件：${selectedFile.relativePath}` : '当前预览文件：未选择',
       '项目指令：Pi 会根据当前工作区自动发现并读取 AGENTS.md、CLAUDE.md 等项目上下文文件。',
       '说明：这里展示会补充到 Pi system prompt 的产品配置摘要；Tools / Skills 只有接入为 Pi 工具后才会被真实调用。',
@@ -4625,6 +4758,68 @@ function App(): ReactElement {
               </label>
 
               <div className="form-section-heading wide-field">
+                <strong>知识</strong>
+                <span>配置会长期注入当前智能体上下文的文档概述或纯文本知识。</span>
+                <button type="button" className="quiet-button compact-button" onClick={addAgentKnowledgeItem}>
+                  <Plus size={16} />
+                  <span>新增知识</span>
+                </button>
+              </div>
+              <div className="wide-field knowledge-table">
+                <div className="knowledge-row knowledge-row-header">
+                  <strong>标题</strong>
+                  <strong>类型</strong>
+                  <strong>内容 / 概述</strong>
+                  <strong>操作</strong>
+                </div>
+                {agentEditor.knowledgeItems.length === 0 ? (
+                  <p className="empty-state knowledge-empty">暂无知识，可以先添加文档概述或纯文本知识。</p>
+                ) : (
+                  agentEditor.knowledgeItems.map((item) => {
+                    const summary =
+                      item.type === 'document'
+                        ? `路径：${item.filePath || '未选择'}；概述：${item.overview || '未填写'}`
+                        : getKnowledgeSummary(item);
+                    const shouldCollapse = summary.length > 120;
+                    return (
+                      <div className="knowledge-row" key={item.id}>
+                        <strong>{item.title || '未命名知识'}</strong>
+                        <span>{item.type === 'document' ? '文档' : '纯文本'}</span>
+                        <div className="knowledge-summary">
+                          <span>{truncateInlineText(summary || '未填写')}</span>
+                          {shouldCollapse && (
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => setAgentKnowledgeViewer(item)}
+                            >
+                              查看更多
+                            </button>
+                          )}
+                        </div>
+                        <div className="knowledge-actions">
+                          <button
+                            type="button"
+                            className="quiet-button compact-button"
+                            onClick={() => setAgentKnowledgeEditor(item)}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            className="quiet-button compact-button"
+                            onClick={() => deleteAgentKnowledgeItem(item.id)}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="form-section-heading wide-field">
                 <strong>常规任务</strong>
                 <span>把某一类常见任务沉淀成快捷入口，使用时只需选择任务并补充材料。</span>
                 <button type="button" className="quiet-button compact-button" onClick={addAgentTaskTemplate}>
@@ -4813,6 +5008,135 @@ function App(): ReactElement {
                 <span>保存智能体</span>
               </button>
             </div>
+          </section>
+        </div>
+      )}
+
+      {agentKnowledgeEditor && (
+        <div className="modal-backdrop action-dialog-backdrop" role="presentation">
+          <section className="modal-panel knowledge-modal" role="dialog" aria-modal="true" aria-label="编辑知识">
+            <div className="panel-heading with-action">
+              <div>
+                <FileText size={20} />
+                <h3>{agentKnowledgeEditor.title ? `编辑知识：${agentKnowledgeEditor.title}` : '新增知识'}</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setAgentKnowledgeEditor(null)}
+                aria-label="关闭"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="model-form-layout">
+              <label className="wide-field">
+                <span>{requiredLabel('标题')}</span>
+                <input
+                  value={agentKnowledgeEditor.title}
+                  onChange={(event) =>
+                    setAgentKnowledgeEditor((item) => (item ? { ...item, title: event.target.value } : item))
+                  }
+                  placeholder="例如 KYC 卡证 OCR 识别规则"
+                />
+              </label>
+              <label>
+                <span>类型</span>
+                <select
+                  value={agentKnowledgeEditor.type}
+                  onChange={(event) =>
+                    setAgentKnowledgeEditor((item) =>
+                      item ? { ...item, type: event.target.value as AgentKnowledgeItem['type'] } : item,
+                    )
+                  }
+                >
+                  <option value="document">文档</option>
+                  <option value="text">纯文本</option>
+                </select>
+              </label>
+              {agentKnowledgeEditor.type === 'document' ? (
+                <>
+                  <div className="wide-field knowledge-file-picker">
+                    <span>{requiredLabel('本地文件')}</span>
+                    <div className="knowledge-file-row">
+                      <input value={agentKnowledgeEditor.filePath} readOnly placeholder="请选择一个本地文件" />
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => knowledgeFileInputRef.current?.click()}
+                      >
+                        <FolderOpen size={16} />
+                        <span>选择文件</span>
+                      </button>
+                    </div>
+                    <input
+                      ref={knowledgeFileInputRef}
+                      className="hidden-file-input"
+                      type="file"
+                      onChange={selectAgentKnowledgeFile}
+                    />
+                  </div>
+                  <label className="wide-field">
+                    <span>{requiredLabel('概述')}</span>
+                    <textarea
+                      value={agentKnowledgeEditor.overview}
+                      onChange={(event) =>
+                        setAgentKnowledgeEditor((item) =>
+                          item ? { ...item, overview: event.target.value } : item,
+                        )
+                      }
+                      rows={5}
+                      placeholder="说明这份文档是什么、何时参考、包含哪些关键内容。"
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="wide-field">
+                  <span>{requiredLabel('文本内容')}</span>
+                  <textarea
+                    value={agentKnowledgeEditor.content}
+                    onChange={(event) =>
+                      setAgentKnowledgeEditor((item) =>
+                        item ? { ...item, content: event.target.value } : item,
+                      )
+                    }
+                    rows={8}
+                    placeholder="填写会直接注入智能体上下文的纯文本知识。"
+                  />
+                </label>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="quiet-button" onClick={() => setAgentKnowledgeEditor(null)}>
+                取消
+              </button>
+              <button type="button" onClick={() => saveAgentKnowledgeItem(agentKnowledgeEditor)}>
+                <Save size={16} />
+                <span>保存知识</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {agentKnowledgeViewer && (
+        <div className="modal-backdrop action-dialog-backdrop" role="presentation">
+          <section className="modal-panel knowledge-modal" role="dialog" aria-modal="true" aria-label="查看知识">
+            <div className="panel-heading with-action">
+              <div>
+                <FileText size={20} />
+                <h3>{agentKnowledgeViewer.title || '知识内容'}</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setAgentKnowledgeViewer(null)}
+                aria-label="关闭"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <pre className="knowledge-full-text">{getKnowledgeSummary(agentKnowledgeViewer)}</pre>
           </section>
         </div>
       )}

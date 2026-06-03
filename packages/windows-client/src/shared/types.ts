@@ -330,12 +330,24 @@ export interface AgentTaskTemplate {
 	enabled: boolean;
 }
 
+export type AgentKnowledgeType = "document" | "text";
+
+export interface AgentKnowledgeItem {
+	id: string;
+	title: string;
+	type: AgentKnowledgeType;
+	overview: string;
+	content: string;
+	filePath: string;
+}
+
 export interface AgentConfig {
 	id: string;
 	name: string;
 	description: string;
 	rules: AgentRuleConfig;
 	taskTemplates: AgentTaskTemplate[];
+	knowledgeItems: AgentKnowledgeItem[];
 	type: AgentNodeType;
 	parentAgentIds: string[];
 	childAgentIds: string[];

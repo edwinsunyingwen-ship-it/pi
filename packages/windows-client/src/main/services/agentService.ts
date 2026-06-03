@@ -684,8 +684,24 @@ export class AgentService {
 			"",
 			"注意：上面的业务能力是产品配置说明。只有当 Pi 工具列表中实际存在对应工具时才可以直接调用；否则请把它们作为业务背景和任务规划依据。",
 			"",
-			"## 可调度子智能体",
+			"## 知识",
 		);
+
+		if (agent.knowledgeItems.length === 0) {
+			lines.push("- 暂未配置知识。");
+		} else {
+			for (const item of agent.knowledgeItems) {
+				if (item.type === "document") {
+					lines.push(
+						`- ${item.title}：文档；路径：${item.filePath || "未选择"}；概述：${item.overview || "未填写"}`,
+					);
+				} else {
+					lines.push(`- ${item.title}：纯文本`, item.content || "未填写");
+				}
+			}
+		}
+
+		lines.push("", "## 可调度子智能体");
 
 		if (childAgents.length === 0) {
 			lines.push("- 暂未配置子智能体。");
