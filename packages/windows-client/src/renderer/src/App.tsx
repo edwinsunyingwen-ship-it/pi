@@ -30,7 +30,6 @@ import {
 } from 'lucide-react';
 import type {
   AgentConfig,
-  AgentImageContent,
   AgentKnowledgeItem,
   ConversationStoreState,
   AgentRuleConfig,
@@ -105,7 +104,6 @@ const auditPageSize = 100;
 const maxConversationTitleLength = 60;
 const auditContentPreviewMaxLength = 120;
 const maxComposerAttachments = 20;
-const maxAttachmentTextLength = 30000;
 const textAttachmentExtensions = new Set([
   'txt',
   'md',
@@ -150,7 +148,6 @@ interface ComposerAttachment {
   type: string;
   size: number;
   kind: 'image' | 'text' | 'document' | 'file';
-  content: string;
   truncated: boolean;
   readable: boolean;
   sourcePath?: string;
@@ -423,49 +420,30 @@ function getFileSourcePath(file: File): string | undefined {
   return candidate?.trim() || undefined;
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      resolve(typeof reader.result === 'string' ? reader.result : '');
-    });
-    reader.addEventListener('error', () => {
-      reject(reader.error ?? new Error(`Failed to read ${file.name}`));
-    });
-    reader.readAsDataURL(file);
-  });
-}
-
 async function createComposerAttachment(file: File): Promise<ComposerAttachment> {
   const sourcePath = getFileSourcePath(file);
   if (file.type.startsWith('image/')) {
-    const content = await readFileAsDataUrl(file);
     return {
       id: crypto.randomUUID(),
       name: file.name || 'pasted-image',
       type: file.type || 'image/*',
       size: file.size,
       kind: 'image',
-      content,
       truncated: false,
-      readable: true,
+      readable: Boolean(sourcePath),
       sourcePath,
-      previewDataUrl: content,
     };
   }
 
   if (isTextAttachment(file)) {
-    const text = await file.text();
-    const truncated = text.length > maxAttachmentTextLength;
     return {
       id: crypto.randomUUID(),
       name: file.name,
       type: file.type || 'text/plain',
       size: file.size,
       kind: 'text',
-      content: truncated ? text.slice(0, maxAttachmentTextLength) : text,
-      truncated,
-      readable: true,
+      truncated: false,
+      readable: Boolean(sourcePath),
       sourcePath,
     };
   }
@@ -477,7 +455,6 @@ async function createComposerAttachment(file: File): Promise<ComposerAttachment>
       type: 'application/pdf',
       size: file.size,
       kind: 'document',
-      content: '',
       truncated: false,
       readable: Boolean(sourcePath),
       sourcePath,
@@ -490,7 +467,6 @@ async function createComposerAttachment(file: File): Promise<ComposerAttachment>
     type: file.type || 'application/octet-stream',
     size: file.size,
     kind: 'file',
-    content: '',
     truncated: false,
     readable: false,
     sourcePath,
@@ -501,15 +477,12 @@ function formatAttachmentForPrompt(attachment: ComposerAttachment, index: number
   const header = `Attachment ${index + 1}: ${attachment.name} (${attachment.type || 'unknown'}, ${formatBytes(attachment.size)})`;
   const sourcePathLine = attachment.sourcePath
     ? `\npath: ${attachment.sourcePath}`
-    : '\npath: unavailable; use the inline content or image payload if present';
+    : '\npath: unavailable';
   if (attachment.kind === 'image') {
-    return `${header}${sourcePathLine}\nkind: image\ncontent: provided through the message image input channel. If a path is present, existing Pi tools may also read it by absolute path.`;
+    return `${header}${sourcePathLine}\nkind: image\ncontent: not inlined. No image payload was sent to the model.`;
   }
   if (attachment.kind === 'text') {
-    if (attachment.sourcePath) {
-      return `${header}${sourcePathLine}\nkind: text\ncontent: not inlined because the file is accessible by path. Use existing Pi tools such as read when the task needs the file contents.`;
-    }
-    return `${header}${sourcePathLine}\nkind: text\ncontent: inlined because no local path is available.${attachment.truncated ? '\nnote: content was truncated to the first 30000 characters.' : ''}\n\n${attachment.content}`;
+    return `${header}${sourcePathLine}\nkind: text\ncontent: not inlined. Use the available path and existing Pi tools such as read when the task needs file contents.`;
   }
   if (attachment.kind === 'document') {
     return `${header}${sourcePathLine}\nkind: document\ncontent: not inlined. Use the available path and existing Pi tools/commands to inspect or extract document text when needed.`;
@@ -526,6 +499,7 @@ function buildMessageWithAttachments(message: string, attachments: ComposerAttac
     '',
     '<client_attachment_manifest>',
     'The user attached files to this conversation. Treat this as internal context and do not repeat the manifest verbatim to the user.',
+    'Only attachment metadata is provided here. The client did not inline attachment contents or send image payloads to the model.',
     'Use existing Pi tools such as read and bash to inspect attached files by absolute path when the task needs file contents.',
     'Do not require a workspace merely to read or analyze an attached file. Workspace selection is only needed when no output location can be inferred or when writing files requires a target directory.',
     'If the user asks to write output in the same directory as an attachment and that attachment has a path, use the attachment path directory as the intended output directory.',
@@ -538,25 +512,6 @@ function buildMessageWithAttachments(message: string, attachments: ComposerAttac
 
 function buildTranscriptMessageWithAttachments(message: string, attachments: ComposerAttachment[]): string {
   return message || (attachments.length > 0 ? '已发送附件' : '');
-}
-
-function dataUrlToImageContent(dataUrl: string, fallbackMimeType: string): AgentImageContent | null {
-  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
-  if (!match) {
-    return null;
-  }
-  return {
-    type: 'image',
-    mimeType: match[1] || fallbackMimeType,
-    data: match[2],
-  };
-}
-
-function buildAttachmentImages(attachments: ComposerAttachment[]): AgentImageContent[] {
-  return attachments
-    .filter((attachment) => attachment.kind === 'image')
-    .map((attachment) => dataUrlToImageContent(attachment.content, attachment.type))
-    .filter((image): image is AgentImageContent => Boolean(image));
 }
 
 function toConversationAttachmentMeta(attachment: ComposerAttachment): ConversationAttachmentMeta {
@@ -2821,7 +2776,6 @@ function App(): ReactElement {
     const attachmentsToSend = composerAttachments;
     const outboundMessage = buildMessageWithAttachments(message, attachmentsToSend, activeWorkspace.path);
     const transcriptMessage = buildTranscriptMessageWithAttachments(message, attachmentsToSend);
-    const attachmentImages = buildAttachmentImages(attachmentsToSend);
     const transcriptAttachments = attachmentsToSend.map((attachment) => toConversationAttachmentMeta(attachment));
     let messageSession = session;
     const messageConversation = selectedConversation;
@@ -2852,7 +2806,7 @@ function App(): ReactElement {
     clearCurrentConversationAttachments(messageConversation.id);
     setStatusText('正在通过适配器发送消息');
 
-    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage, attachmentImages);
+    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage);
     const assistantTranscript = [
       ...userTranscript,
       { role: 'assistant' as const, text: result.responseText, createdAt: result.createdAt },
