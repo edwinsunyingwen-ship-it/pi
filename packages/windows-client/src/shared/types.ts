@@ -57,6 +57,7 @@ export interface AgentMessageResult {
 	responseText: string;
 	createdAt: string;
 	capabilityCalls?: AgentCapabilityCallLog[];
+	modelInteractions?: AgentModelInteractionLog[];
 }
 
 export interface AgentImageContent {
@@ -110,6 +111,23 @@ export interface AgentCapabilityCallLog {
 	startedAt?: string;
 	endedAt?: string;
 	durationMs?: number;
+}
+
+export interface AgentModelInteractionLog {
+	callId: string;
+	kind: "context" | "payload" | "response";
+	modelProvider?: string;
+	modelId?: string;
+	modelName?: string;
+	modelApi?: string;
+	inputSummary?: string;
+	outputSummary?: string;
+	fullInput?: string;
+	fullOutput?: string;
+	status: AuditStatus;
+	startedAt?: string;
+	endedAt?: string;
+	errorMessage?: string;
 }
 
 export interface ModelConnectionTestResult {

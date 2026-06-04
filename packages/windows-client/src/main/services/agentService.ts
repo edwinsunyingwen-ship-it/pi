@@ -3,6 +3,7 @@ import type {
 	AgentConfig,
 	AgentImageContent,
 	AgentMessageResult,
+	AgentModelInteractionLog,
 	AgentSession,
 	AgentToolInfo,
 	AuditStatus,
@@ -96,6 +97,7 @@ export class AgentService {
 
 		try {
 			const result = await this.adapter.sendUserMessage(sessionId, message, images);
+			await this.writeModelInteractionAudits(sessionId, result.modelInteractions ?? []);
 			await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
 			await this.writeAudit({
 				sessionId,
@@ -414,6 +416,44 @@ export class AgentService {
 					call.status === "failure"
 						? this.truncate(this.redactSensitive(call.outputSummary ?? ""), 500)
 						: undefined,
+			});
+		}
+	}
+
+	private async writeModelInteractionAudits(
+		sessionId: string,
+		interactions: AgentModelInteractionLog[],
+	): Promise<void> {
+		for (const interaction of interactions) {
+			const modelLabel = [interaction.modelProvider, interaction.modelId].filter(Boolean).join("/");
+			const action =
+				interaction.kind === "context"
+					? "model-request-context"
+					: interaction.kind === "payload"
+						? "model-request-payload"
+						: "model-response";
+			const modelSummary = modelLabel
+				? `${modelLabel}${interaction.modelApi ? ` (${interaction.modelApi})` : ""}`
+				: "unknown model";
+
+			await this.writeAudit({
+				sessionId,
+				toolName: "llm-provider",
+				businessAction: action,
+				operationStartedAt: interaction.startedAt,
+				operationEndedAt: interaction.endedAt,
+				inputSummary: interaction.inputSummary
+					? this.truncate(`${modelSummary}: ${interaction.inputSummary}`, 500)
+					: modelSummary,
+				outputSummary: interaction.outputSummary
+					? this.truncate(`${modelSummary}: ${interaction.outputSummary}`, 500)
+					: undefined,
+				fullInput: interaction.fullInput,
+				fullOutput: interaction.fullOutput,
+				status: interaction.status,
+				errorMessage: interaction.errorMessage
+					? this.truncate(this.redactSensitive(interaction.errorMessage), 500)
+					: undefined,
 			});
 		}
 	}

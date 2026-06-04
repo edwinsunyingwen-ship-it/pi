@@ -16,6 +16,7 @@ import type {
 	AgentEvent,
 	AgentLoopConfig,
 	AgentMessage,
+	AgentModelRequestMetadata,
 	AgentTool,
 	AgentToolCall,
 	AgentToolResult,
@@ -296,16 +297,39 @@ async function streamAssistantResponse(
 	};
 
 	const streamFunction = streamFn || streamSimple;
+	const requestModel = getModelRequestMetadata(config.model);
+	await emit({
+		type: "model_request",
+		model: requestModel,
+		context: llmContext,
+		reasoning: config.reasoning,
+	});
 
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
 
-	const response = await streamFunction(config.model, llmContext, {
-		...config,
-		apiKey: resolvedApiKey,
-		signal,
-	});
+	let response: ReturnType<StreamFn> extends Promise<infer TResult> ? TResult : ReturnType<StreamFn>;
+	try {
+		response = await streamFunction(config.model, llmContext, {
+			...config,
+			apiKey: resolvedApiKey,
+			onPayload: async (payload, model) => {
+				const nextPayload = await config.onPayload?.(payload, model);
+				const sentPayload = nextPayload ?? payload;
+				await emit({ type: "model_request_payload", model: getModelRequestMetadata(model), payload: sentPayload });
+				return sentPayload;
+			},
+			signal,
+		});
+	} catch (error) {
+		await emit({
+			type: "model_response",
+			model: requestModel,
+			errorMessage: error instanceof Error ? error.message : String(error),
+		});
+		throw error;
+	}
 
 	let partialMessage: AssistantMessage | null = null;
 	let addedPartial = false;
@@ -342,6 +366,7 @@ async function streamAssistantResponse(
 			case "done":
 			case "error": {
 				const finalMessage = await response.result();
+				await emit({ type: "model_response", model: requestModel, message: finalMessage });
 				if (addedPartial) {
 					context.messages[context.messages.length - 1] = finalMessage;
 				} else {
@@ -357,6 +382,7 @@ async function streamAssistantResponse(
 	}
 
 	const finalMessage = await response.result();
+	await emit({ type: "model_response", model: requestModel, message: finalMessage });
 	if (addedPartial) {
 		context.messages[context.messages.length - 1] = finalMessage;
 	} else {
@@ -365,6 +391,15 @@ async function streamAssistantResponse(
 	}
 	await emit({ type: "message_end", message: finalMessage });
 	return finalMessage;
+}
+
+function getModelRequestMetadata(model: AgentLoopConfig["model"]): AgentModelRequestMetadata {
+	return {
+		provider: model.provider,
+		modelId: model.id,
+		modelName: model.name,
+		api: model.api,
+	};
 }
 
 /**

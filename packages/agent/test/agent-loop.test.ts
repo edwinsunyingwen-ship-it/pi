@@ -1053,6 +1053,8 @@ describe("agentLoop with AgentMessage", () => {
 			"turn_start",
 			"message_start",
 			"message_end",
+			"model_request",
+			"model_response",
 			"message_start",
 			"message_end",
 			"tool_execution_start",

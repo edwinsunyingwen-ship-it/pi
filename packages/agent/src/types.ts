@@ -1,6 +1,7 @@
 import type {
 	AssistantMessage,
 	AssistantMessageEvent,
+	Context,
 	ImageContent,
 	Message,
 	Model,
@@ -385,6 +386,13 @@ export interface AgentContext {
 	tools?: AgentTool<any>[];
 }
 
+export interface AgentModelRequestMetadata {
+	provider: string;
+	modelId: string;
+	modelName: string;
+	api: string;
+}
+
 /**
  * Events emitted by the Agent for UI updates.
  *
@@ -396,6 +404,15 @@ export type AgentEvent =
 	// Agent lifecycle
 	| { type: "agent_start" }
 	| { type: "agent_end"; messages: AgentMessage[] }
+	// Model request lifecycle - emitted around each provider call.
+	| {
+			type: "model_request";
+			model: AgentModelRequestMetadata;
+			context: Context;
+			reasoning?: ThinkingLevel;
+	  }
+	| { type: "model_request_payload"; model: AgentModelRequestMetadata; payload: unknown }
+	| { type: "model_response"; model: AgentModelRequestMetadata; message?: AssistantMessage; errorMessage?: string }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
 	| { type: "turn_start" }
 	| { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] }

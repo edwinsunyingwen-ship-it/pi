@@ -9,6 +9,7 @@ import type {
 	AgentCapabilityCallLog,
 	AgentImageContent,
 	AgentMessageResult,
+	AgentModelInteractionLog,
 	AgentSession,
 	AgentToolInfo,
 	CapabilityConfig,
@@ -67,6 +68,16 @@ type RpcEvent = {
 		stopReason?: string;
 		errorMessage?: string;
 	};
+	model?: {
+		provider?: string;
+		modelId?: string;
+		modelName?: string;
+		api?: string;
+	};
+	context?: unknown;
+	payload?: unknown;
+	reasoning?: string;
+	errorMessage?: string;
 };
 
 export interface AgentAdapter {
@@ -192,6 +203,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			responseText: responseText.trim(),
 			createdAt: new Date().toISOString(),
 			capabilityCalls: this.extractCapabilityCalls(events),
+			modelInteractions: this.extractModelInteractions(events),
 		};
 	}
 
@@ -1293,6 +1305,78 @@ export default function (pi) {
 		return orderedIds.map((id) => calls.get(id)).filter((call): call is AgentCapabilityCallLog => Boolean(call));
 	}
 
+	private extractModelInteractions(events: RpcEvent[]): AgentModelInteractionLog[] {
+		const interactions: AgentModelInteractionLog[] = [];
+		let callIndex = 0;
+		let currentCallId = "";
+
+		for (const event of events) {
+			if (event.type === "model_request") {
+				callIndex++;
+				currentCallId = `model-call-${callIndex}`;
+				const request = {
+					model: event.model,
+					reasoning: event.reasoning,
+					context: event.context,
+				};
+				const fullInput = this.redactSensitive(this.stringifyUnknown(request));
+				interactions.push({
+					callId: currentCallId,
+					kind: "context",
+					modelProvider: event.model?.provider,
+					modelId: event.model?.modelId,
+					modelName: event.model?.modelName,
+					modelApi: event.model?.api,
+					inputSummary: this.summarizeModelInput(event.context),
+					fullInput,
+					status: "success",
+					startedAt: new Date().toISOString(),
+				});
+				continue;
+			}
+
+			if (event.type === "model_request_payload") {
+				const callId = currentCallId || `model-call-${callIndex + 1}`;
+				const fullInput = this.redactSensitive(this.stringifyUnknown(event.payload));
+				interactions.push({
+					callId,
+					kind: "payload",
+					modelProvider: event.model?.provider,
+					modelId: event.model?.modelId,
+					modelName: event.model?.modelName,
+					modelApi: event.model?.api,
+					inputSummary: "Provider payload",
+					fullInput,
+					status: "success",
+					startedAt: new Date().toISOString(),
+				});
+				continue;
+			}
+
+			if (event.type === "model_response") {
+				const callId = currentCallId || `model-call-${callIndex || 1}`;
+				const messageError = this.getAssistantMessageError(event.message);
+				const errorMessage = event.errorMessage ?? messageError;
+				const fullOutput = this.redactSensitive(this.stringifyUnknown(event.message ?? { error: errorMessage }));
+				interactions.push({
+					callId,
+					kind: "response",
+					modelProvider: event.model?.provider,
+					modelId: event.model?.modelId,
+					modelName: event.model?.modelName,
+					modelApi: event.model?.api,
+					outputSummary: errorMessage ?? this.summarizeAssistantMessage(event.message),
+					fullOutput,
+					status: errorMessage ? "failure" : "success",
+					endedAt: new Date().toISOString(),
+					errorMessage,
+				});
+			}
+		}
+
+		return interactions;
+	}
+
 	private extractToolCallsFromMessages(
 		messages: NonNullable<RpcEvent["messages"]>,
 		ensureCall: (id: string, toolName: string) => AgentCapabilityCallLog,
@@ -1358,6 +1442,71 @@ export default function (pi) {
 			.replace(/("(?:api[_-]?key|token|authorization|password|secret)"\s*:\s*)"[^"]+"/gi, '$1"***"')
 			.replace(/(bearer\s+)[a-z0-9._-]+/gi, "$1***");
 		return redacted.length <= maxLength ? redacted : `${redacted.slice(0, maxLength - 3)}...`;
+	}
+
+	private redactSensitive(value: string): string {
+		return value
+			.replace(/("(?:api[_-]?key|token|authorization|password|secret)"\s*:\s*)"[^"]+"/gi, '$1"***"')
+			.replace(/(bearer\s+)[a-z0-9._-]+/gi, "$1***");
+	}
+
+	private stringifyUnknown(value: unknown): string {
+		try {
+			return JSON.stringify(value, (_key, item) => (typeof item === "function" ? "[function]" : item), 2);
+		} catch {
+			return String(value);
+		}
+	}
+
+	private summarizeModelInput(context: unknown): string {
+		if (!this.isRecord(context)) {
+			return "Model request context";
+		}
+		const messages = Array.isArray(context.messages) ? context.messages.length : 0;
+		const tools = Array.isArray(context.tools) ? context.tools.length : 0;
+		const systemPrompt = typeof context.systemPrompt === "string" ? context.systemPrompt : "";
+		const promptPreview = systemPrompt.trim()
+			? `system: ${this.summarizeUnknown(systemPrompt, 120)}`
+			: "no system prompt";
+		return `LLM context: ${messages} messages, ${tools} tools, ${promptPreview}`;
+	}
+
+	private summarizeAssistantMessage(message: unknown): string {
+		if (!this.isRecord(message)) {
+			return "Model response";
+		}
+		const content = message.content;
+		if (Array.isArray(content)) {
+			const text = content
+				.filter(
+					(item): item is { type: "text"; text: string } =>
+						this.isRecord(item) && item.type === "text" && typeof item.text === "string",
+				)
+				.map((item) => item.text)
+				.join("\n")
+				.trim();
+			if (text) {
+				return this.summarizeUnknown(text, 240) ?? "Model response";
+			}
+		}
+		if (typeof content === "string" && content.trim()) {
+			return this.summarizeUnknown(content, 240) ?? "Model response";
+		}
+		const stopReason = typeof message.stopReason === "string" ? message.stopReason : "unknown";
+		return `Model response: ${stopReason}`;
+	}
+
+	private getAssistantMessageError(message: unknown): string | undefined {
+		if (!this.isRecord(message)) {
+			return undefined;
+		}
+		const stopReason = typeof message.stopReason === "string" ? message.stopReason : "";
+		if (stopReason !== "error" && stopReason !== "aborted") {
+			return undefined;
+		}
+		return typeof message.errorMessage === "string" && message.errorMessage.trim()
+			? message.errorMessage.trim()
+			: `Model response ended with ${stopReason}`;
 	}
 
 	private isRecord(value: unknown): value is Record<string, unknown> {
