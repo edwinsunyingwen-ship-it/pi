@@ -423,19 +423,21 @@ function getFileSourcePath(file: File): string | undefined {
 }
 
 async function createComposerAttachment(file: File): Promise<ComposerAttachment> {
-  const sourcePath = getFileSourcePath(file);
-  if (file.type.startsWith('image/')) {
-    return {
-      id: crypto.randomUUID(),
-      name: file.name || 'pasted-image',
-      type: file.type || 'image/*',
-      size: file.size,
-      kind: 'image',
-      truncated: false,
-      readable: Boolean(sourcePath),
-      sourcePath,
-    };
-  }
+	const sourcePath = getFileSourcePath(file);
+	if (file.type.startsWith('image/')) {
+		const previewDataUrl = await createImagePreviewDataUrl(file);
+		return {
+			id: crypto.randomUUID(),
+			name: file.name || 'pasted-image',
+			type: file.type || 'image/*',
+			size: file.size,
+			kind: 'image',
+			truncated: false,
+			readable: Boolean(sourcePath),
+			sourcePath,
+			previewDataUrl,
+		};
+	}
 
   if (isTextAttachment(file)) {
     return {
@@ -447,8 +449,40 @@ async function createComposerAttachment(file: File): Promise<ComposerAttachment>
       truncated: false,
       readable: Boolean(sourcePath),
       sourcePath,
-    };
-  }
+	};
+}
+
+async function createImagePreviewDataUrl(file: File): Promise<string | undefined> {
+	const source = await new Promise<string>((resolvePromise, rejectPromise) => {
+		const reader = new FileReader();
+		reader.addEventListener('load', () => resolvePromise(String(reader.result ?? '')));
+		reader.addEventListener('error', () => rejectPromise(reader.error ?? new Error('Failed to read image attachment.')));
+		reader.readAsDataURL(file);
+	});
+	if (!source) {
+		return undefined;
+	}
+
+	const image = await new Promise<HTMLImageElement>((resolvePromise, rejectPromise) => {
+		const element = new Image();
+		element.addEventListener('load', () => resolvePromise(element));
+		element.addEventListener('error', () => rejectPromise(new Error('Failed to render image attachment preview.')));
+		element.src = source;
+	});
+	const maxSize = 96;
+	const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+	const width = Math.max(1, Math.round(image.naturalWidth * scale));
+	const height = Math.max(1, Math.round(image.naturalHeight * scale));
+	const canvas = document.createElement('canvas');
+	canvas.width = width;
+	canvas.height = height;
+	const context = canvas.getContext('2d');
+	if (!context) {
+		return source;
+	}
+	context.drawImage(image, 0, 0, width, height);
+	return canvas.toDataURL('image/jpeg', 0.78);
+}
 
   if (isPdfAttachment(file)) {
     return {
@@ -3405,9 +3439,9 @@ function App(): ReactElement {
                       <FolderOpen size={16} />
                       <span>工作区</span>
                     </button>
-                    <button type="button" className="composer-tool-button" onClick={() => setContextPanelOpen(true)}>
+                    <button type="button" className="composer-tool-button" onClick={() => setContextPanelOpen((open) => !open)}>
                       <FileText size={16} />
-                      <span>上下文</span>
+                      <span>{contextPanelOpen ? '收起上下文' : '上下文'}</span>
                     </button>
                     <button
                       type="button"
@@ -3607,7 +3641,10 @@ function App(): ReactElement {
                     )}
                   </div>
                   <div className="file-preview compact-preview">
-                    <strong>{selectedFile ? selectedFile.relativePath : '文件预览'}</strong>
+                    <div className="file-preview-heading">
+                      <strong>文件预览</strong>
+                      {selectedFile && <small title={selectedFile.relativePath}>{selectedFile.relativePath}</small>}
+                    </div>
                     <pre>{fileContent || '请选择一个工作区内的文本文件。'}</pre>
                   </div>
                 </aside>

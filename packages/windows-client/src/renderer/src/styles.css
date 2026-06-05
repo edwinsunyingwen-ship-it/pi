@@ -4039,7 +4039,16 @@ select:focus {
 	gap: 12px;
 	height: 100%;
 	overflow-y: auto;
-	padding-right: 10px;
+	padding-right: 0;
+}
+
+.app-shell > .dashboard-grid .context-panel > .compact-title {
+	background: #fbfcfe;
+	margin: -16px -16px 0 -16px;
+	padding: 16px 16px 10px 16px;
+	position: sticky;
+	top: 0;
+	z-index: 3;
 }
 
 .app-shell > .dashboard-grid .context-panel .prompt-context-preview pre,
@@ -4057,6 +4066,31 @@ select:focus {
 
 .app-shell > .dashboard-grid .context-panel .compact-preview {
 	margin-top: 2px;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.app-shell > .dashboard-grid .context-panel .file-preview-heading {
+	display: grid;
+	gap: 4px;
+	min-width: 0;
+}
+
+.app-shell > .dashboard-grid .context-panel .file-preview-heading small {
+	color: #667085;
+	font-size: 0.78rem;
+	font-weight: 700;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.app-shell > .dashboard-grid .context-panel .compact-preview pre {
+	max-width: 100%;
+	overflow-x: auto;
+	overflow-y: visible;
+	white-space: pre-wrap;
+	word-break: break-word;
 }
 
 .app-shell > .dashboard-grid .focused-conversation {
