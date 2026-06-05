@@ -92,6 +92,7 @@ export class AgentService {
 			sessionId,
 			businessAction: "agent-user-question",
 			inputSummary: this.truncate(message),
+			fullInput: message,
 			status: "success",
 		});
 
@@ -103,6 +104,7 @@ export class AgentService {
 				sessionId,
 				businessAction: "agent-assistant-reply",
 				outputSummary: this.truncate(result.responseText),
+				fullOutput: result.responseText,
 				status: "success",
 			});
 			return result;
@@ -390,7 +392,7 @@ export class AgentService {
 					operationStartedAt: call.startedAt,
 					inputSummary: this.truncate(input, 500),
 					outputSummary: callSummary,
-					fullInput: input,
+					fullInput: call.fullInput ? this.redactSensitive(call.fullInput) : input,
 					fullOutput: callSummary,
 					status: "success",
 				});
@@ -409,8 +411,14 @@ export class AgentService {
 				operationEndedAt: call.endedAt,
 				inputSummary: call.inputSummary ? this.truncate(this.redactSensitive(call.inputSummary), 240) : undefined,
 				outputSummary: this.truncate(resultOutput, 500),
-				fullInput: call.inputSummary ? this.redactSensitive(call.inputSummary) : undefined,
-				fullOutput: resultOutput,
+				fullInput: call.fullInput
+					? this.redactSensitive(call.fullInput)
+					: call.inputSummary
+						? this.redactSensitive(call.inputSummary)
+						: undefined,
+				fullOutput: call.fullOutput
+					? `${callSummary}；返回：${this.redactSensitive(call.fullOutput)}`
+					: resultOutput,
 				status: call.status,
 				errorMessage:
 					call.status === "failure"

@@ -80,6 +80,8 @@ type RpcEvent = {
 	errorMessage?: string;
 };
 
+type JsonRecord = Record<string, unknown>;
+
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
 	sendUserMessage(sessionId: string, message: string, images?: AgentImageContent[]): Promise<AgentMessageResult>;
@@ -1270,12 +1272,14 @@ export default function (pi) {
 				const call = ensureCall(event.toolCallId, event.toolName);
 				call.startedAt = call.startedAt ?? new Date().toISOString();
 				call.inputSummary = this.summarizeUnknown(event.args ?? event.input);
+				call.fullInput = this.redactSensitive(this.stringifyUnknown(event.args ?? event.input));
 				continue;
 			}
 
 			if (event.type === "tool_execution_update" && event.toolCallId && event.toolName) {
 				const call = ensureCall(event.toolCallId, event.toolName);
 				call.outputSummary = call.outputSummary ?? this.summarizeUnknown(event.partialResult);
+				call.fullOutput = call.fullOutput ?? this.redactSensitive(this.stringifyUnknown(event.partialResult));
 				continue;
 			}
 
@@ -1284,6 +1288,7 @@ export default function (pi) {
 				call.endedAt = new Date().toISOString();
 				call.status = event.isError ? "failure" : "success";
 				call.outputSummary = this.summarizeUnknown(event.result);
+				call.fullOutput = this.redactSensitive(this.stringifyUnknown(event.result));
 				continue;
 			}
 
@@ -1309,15 +1314,17 @@ export default function (pi) {
 		const interactions: AgentModelInteractionLog[] = [];
 		let callIndex = 0;
 		let currentCallId = "";
+		const toolLabelsByName = new Map<string, string>();
 
 		for (const event of events) {
 			if (event.type === "model_request") {
 				callIndex++;
 				currentCallId = `model-call-${callIndex}`;
+				this.collectToolLabels(event.context, toolLabelsByName);
 				const request = {
 					model: event.model,
 					reasoning: event.reasoning,
-					context: event.context,
+					context: this.annotateLoggedContext(event.context, toolLabelsByName),
 				};
 				const fullInput = this.redactSensitive(this.stringifyUnknown(request));
 				interactions.push({
@@ -1337,7 +1344,9 @@ export default function (pi) {
 
 			if (event.type === "model_request_payload") {
 				const callId = currentCallId || `model-call-${callIndex + 1}`;
-				const fullInput = this.redactSensitive(this.stringifyUnknown(event.payload));
+				const fullInput = this.redactSensitive(
+					this.stringifyUnknown(this.annotateLoggedPayload(event.payload, toolLabelsByName)),
+				);
 				interactions.push({
 					callId,
 					kind: "payload",
@@ -1395,6 +1404,9 @@ export default function (pi) {
 					const call = ensureCall(id, name);
 					call.inputSummary =
 						call.inputSummary ?? this.summarizeUnknown(item.arguments ?? item.args ?? item.input);
+					call.fullInput =
+						call.fullInput ??
+						this.redactSensitive(this.stringifyUnknown(item.arguments ?? item.args ?? item.input));
 				}
 			}
 
@@ -1406,6 +1418,7 @@ export default function (pi) {
 				}
 				const call = ensureCall(id, name);
 				call.outputSummary = call.outputSummary ?? this.summarizeUnknown(message.content);
+				call.fullOutput = call.fullOutput ?? this.redactSensitive(this.stringifyUnknown(message.content));
 				call.status = "success";
 			}
 
@@ -1417,9 +1430,86 @@ export default function (pi) {
 					call.inputSummary =
 						call.inputSummary ??
 						this.summarizeUnknown(message.content.arguments ?? message.content.args ?? message.content.input);
+					call.fullInput =
+						call.fullInput ??
+						this.redactSensitive(
+							this.stringifyUnknown(message.content.arguments ?? message.content.args ?? message.content.input),
+						);
 				}
 			}
 		}
+	}
+
+	private collectToolLabels(context: unknown, labelsByName: Map<string, string>): void {
+		if (!this.isRecord(context) || !Array.isArray(context.tools)) {
+			return;
+		}
+		for (const tool of context.tools) {
+			if (!this.isRecord(tool)) {
+				continue;
+			}
+			const name = this.asString(tool.name);
+			const label = this.asString(tool.label);
+			if (name && label && label !== name) {
+				labelsByName.set(name, label);
+			}
+		}
+	}
+
+	private annotateLoggedContext(context: unknown, labelsByName: Map<string, string>): unknown {
+		if (!this.isRecord(context) || !Array.isArray(context.tools)) {
+			return context;
+		}
+		return {
+			...context,
+			tools: context.tools.map((tool) => this.annotateLoggedTool(tool, labelsByName)),
+		};
+	}
+
+	private annotateLoggedPayload(payload: unknown, labelsByName: Map<string, string>): unknown {
+		return this.annotatePayloadValue(payload, labelsByName);
+	}
+
+	private annotatePayloadValue(value: unknown, labelsByName: Map<string, string>): unknown {
+		if (Array.isArray(value)) {
+			return value.map((item) => this.annotatePayloadValue(item, labelsByName));
+		}
+		if (!this.isRecord(value)) {
+			return value;
+		}
+
+		const annotated = this.annotateLoggedTool(value, labelsByName);
+		const result: JsonRecord = {};
+		for (const [key, child] of Object.entries(annotated)) {
+			result[key] = this.annotatePayloadValue(child, labelsByName);
+		}
+		return result;
+	}
+
+	private annotateLoggedTool(value: JsonRecord, labelsByName: Map<string, string>): JsonRecord;
+	private annotateLoggedTool(value: unknown, labelsByName: Map<string, string>): JsonRecord | unknown;
+	private annotateLoggedTool(value: unknown, labelsByName: Map<string, string>): JsonRecord | unknown {
+		if (!this.isRecord(value)) {
+			return value;
+		}
+		const directName = this.asString(value.name);
+		const functionValue = this.isRecord(value.function) ? value.function : undefined;
+		const functionName = this.asString(functionValue?.name);
+		const name = directName ?? functionName;
+		if (!name) {
+			return value;
+		}
+		const label = labelsByName.get(name);
+		if (!label) {
+			return value;
+		}
+		if (directName && !this.asString(value.label)) {
+			return { ...value, label };
+		}
+		if (functionValue && !this.asString(functionValue.label)) {
+			return { ...value, function: { ...functionValue, label } };
+		}
+		return value;
 	}
 
 	private summarizeUnknown(value: unknown, maxLength = 500): string | undefined {

@@ -1,4 +1,5 @@
 :root {
+  --app-chrome-height: 32px;
   --color-bg: #f7f6f2;
   --color-surface: #fffdf8;
   --color-surface-soft: #f5f3ed;
@@ -2210,7 +2211,8 @@ dd {
 }
 
 .audit-detail-modal {
-  max-width: 980px;
+	max-width: 980px;
+	min-height: min(760px, calc(100vh - 48px));
 }
 
 .audit-detail-meta {
@@ -2229,16 +2231,16 @@ dd {
 }
 
 .audit-detail-content {
-  color: #202124;
-  flex: 1 1 auto;
-  font: inherit;
-  line-height: 1.65;
-  margin: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px 20px 20px;
-  white-space: pre-wrap;
-  word-break: break-word;
+	color: #202124;
+	flex: 1 1 auto;
+	font: inherit;
+	line-height: 1.65;
+	margin: 0;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 16px 20px 20px;
+	white-space: pre-wrap;
+	word-break: break-word;
 }
 
 .audit-detail-path {
@@ -3783,7 +3785,7 @@ select:focus {
 .app-shell {
   gap: 0;
   grid-template-columns: 248px minmax(0, 1fr);
-  grid-template-rows: 32px minmax(0, 1fr);
+  grid-template-rows: var(--app-chrome-height) minmax(0, 1fr);
   padding: 0;
   transition: grid-template-columns 160ms ease;
 }
@@ -3914,7 +3916,7 @@ select:focus {
 .app-shell > .global-sidebar {
   grid-column: 1;
   grid-row: 2;
-  height: calc(100vh - 32px);
+  height: calc(100vh - var(--app-chrome-height));
   padding-top: 10px;
   position: relative;
   top: auto;
@@ -3974,17 +3976,20 @@ select:focus {
   display: block;
   grid-column: 2;
   grid-row: 2;
-  height: calc(100vh - 32px);
+  height: calc(100vh - var(--app-chrome-height));
   overflow: hidden;
   padding: 8px 18px 16px;
 }
 
 .app-shell > .dashboard-grid .workbench-grid {
-  grid-template-columns: minmax(0, 1fr);
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr);
+	height: 100%;
+	min-height: 0;
 }
 
 .app-shell > .dashboard-grid .workbench-shell.context-open .workbench-grid {
-  grid-template-columns: minmax(0, 1fr) 320px;
+	grid-template-columns: minmax(0, 1fr) 320px;
 }
 
 .app-shell > .dashboard-grid .session-sidebar {
@@ -4022,9 +4027,36 @@ select:focus {
 }
 
 .app-shell > .dashboard-grid .workbench-grid,
-.app-shell > .dashboard-grid .chat-workspace {
-  min-height: 0;
-  overflow: hidden;
+.app-shell > .dashboard-grid .chat-workspace,
+.app-shell > .dashboard-grid .context-panel {
+	min-height: 0;
+	overflow: hidden;
+}
+
+.app-shell > .dashboard-grid .context-panel {
+	align-content: start;
+	display: grid;
+	gap: 12px;
+	height: 100%;
+	overflow-y: auto;
+	padding-right: 10px;
+}
+
+.app-shell > .dashboard-grid .context-panel .prompt-context-preview pre,
+.app-shell > .dashboard-grid .context-panel .compact-preview pre {
+	max-height: none;
+	overflow: visible;
+}
+
+.app-shell > .dashboard-grid .context-panel .compact-file-list {
+	max-height: 420px;
+	min-height: 280px;
+	overflow-y: auto;
+	padding-right: 4px;
+}
+
+.app-shell > .dashboard-grid .context-panel .compact-preview {
+	margin-top: 2px;
 }
 
 .app-shell > .dashboard-grid .focused-conversation {
@@ -4383,7 +4415,7 @@ select:focus {
   align-items: stretch;
   background: rgb(15 23 42 / 42%);
   display: flex;
-  inset: 0;
+  inset: var(--app-chrome-height) 0 0;
   padding: 0;
   position: fixed;
   z-index: 20;
@@ -4400,7 +4432,7 @@ select:focus {
   box-shadow: none;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh - var(--app-chrome-height));
   max-height: none;
   max-width: none;
   overflow: hidden;
@@ -4496,8 +4528,10 @@ select:focus {
 }
 
 .settings-panel .config-block.list-page {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 .settings-panel .section-title-row {
@@ -4525,9 +4559,17 @@ select:focus {
 }
 
 .settings-panel .list-page-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding-right: 8px;
+}
+
+.settings-panel .config-block.list-page > .audit-pagination {
+  border-top: 1px solid #eef1f5;
+  flex: 0 0 auto;
+  margin-top: 10px;
+  padding-top: 12px;
 }
 
 .model-row {

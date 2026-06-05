@@ -100,6 +100,8 @@ interface SearchNavigationTarget {
 
 const modelPageSize = 20;
 const capabilityPageSize = 20;
+const agentPageSize = 20;
+const archivedConversationPageSize = 20;
 const auditPageSize = 100;
 const maxConversationTitleLength = 60;
 const auditContentPreviewMaxLength = 120;
@@ -1246,6 +1248,10 @@ function App(): ReactElement {
   const [capabilityEditor, setCapabilityEditor] = useState<CapabilityConfig | null>(null);
   const [capabilityPage, setCapabilityPage] = useState(1);
   const [capabilityPageInput, setCapabilityPageInput] = useState('1');
+  const [agentPage, setAgentPage] = useState(1);
+  const [agentPageInput, setAgentPageInput] = useState('1');
+  const [archivedConversationPage, setArchivedConversationPage] = useState(1);
+  const [archivedConversationPageInput, setArchivedConversationPageInput] = useState('1');
   const [auditPageInput, setAuditPageInput] = useState('1');
   const [agentEditor, setAgentEditor] = useState<AgentConfig | null>(null);
   const [agentKnowledgeEditor, setAgentKnowledgeEditor] = useState<AgentKnowledgeItem | null>(null);
@@ -1336,6 +1342,13 @@ function App(): ReactElement {
     return filteredCapabilities.slice((safePage - 1) * capabilityPageSize, safePage * capabilityPageSize);
   }, [capabilityPage, capabilityTotalPages, filteredCapabilities]);
 
+  const agentTotalPages = Math.max(1, Math.ceil((draftConfig?.agents.length ?? 0) / agentPageSize));
+  const pagedAgents = useMemo(() => {
+    const agents = draftConfig?.agents ?? [];
+    const safePage = Math.min(agentPage, agentTotalPages);
+    return agents.slice((safePage - 1) * agentPageSize, safePage * agentPageSize);
+  }, [agentPage, agentTotalPages, draftConfig?.agents]);
+
   useEffect(() => {
     setModelPage(1);
     setModelPageInput('1');
@@ -1359,6 +1372,13 @@ function App(): ReactElement {
       setCapabilityPageInput(String(capabilityTotalPages));
     }
   }, [capabilityPage, capabilityTotalPages]);
+
+  useEffect(() => {
+    if (agentPage > agentTotalPages) {
+      setAgentPage(agentTotalPages);
+      setAgentPageInput(String(agentTotalPages));
+    }
+  }, [agentPage, agentTotalPages]);
 
   const primaryAgents = useMemo(
     () => (draftConfig?.agents ?? []).filter((agent) => agent.type === 'primary' && agent.enabled),
@@ -1397,6 +1417,25 @@ function App(): ReactElement {
         ),
       );
   }, [draftConfig?.agents, conversationRevision]);
+
+  const archivedConversationTotalPages = Math.max(
+    1,
+    Math.ceil(archivedConversations.length / archivedConversationPageSize),
+  );
+  const pagedArchivedConversations = useMemo(() => {
+    const safePage = Math.min(archivedConversationPage, archivedConversationTotalPages);
+    return archivedConversations.slice(
+      (safePage - 1) * archivedConversationPageSize,
+      safePage * archivedConversationPageSize,
+    );
+  }, [archivedConversationPage, archivedConversationTotalPages, archivedConversations]);
+
+  useEffect(() => {
+    if (archivedConversationPage > archivedConversationTotalPages) {
+      setArchivedConversationPage(archivedConversationTotalPages);
+      setArchivedConversationPageInput(String(archivedConversationTotalPages));
+    }
+  }, [archivedConversationPage, archivedConversationTotalPages]);
 
   const searchableAgentOptions = useMemo(() => {
     const agentSummaries = new Map<string, { id: string; name: string; conversationCount: number }>();
@@ -1803,6 +1842,38 @@ function App(): ReactElement {
       : 1;
     setPage(nextPage);
     setInput(String(nextPage));
+  }
+
+  function renderLocalPagination(options: {
+    page: number;
+    totalPages: number;
+    totalItems: number;
+    pageInput: string;
+    setPage: (page: number) => void;
+    setPageInput: (value: string) => void;
+  }): ReactElement {
+    return (
+      <PaginationBar
+        summary={`第 ${options.page} / ${options.totalPages} 页，共 ${options.totalItems} 条`}
+        page={options.page}
+        totalPages={options.totalPages}
+        pageInput={options.pageInput}
+        onPageInputChange={options.setPageInput}
+        onPageInputCommit={() =>
+          commitLocalPageInput(options.pageInput, options.totalPages, options.setPage, options.setPageInput)
+        }
+        onPrevious={() => {
+          const nextPage = Math.max(1, options.page - 1);
+          options.setPage(nextPage);
+          options.setPageInput(String(nextPage));
+        }}
+        onNext={() => {
+          const nextPage = Math.min(options.totalPages, options.page + 1);
+          options.setPage(nextPage);
+          options.setPageInput(String(nextPage));
+        }}
+      />
+    );
   }
 
   async function goToAuditPage(page: number): Promise<void> {
@@ -3790,7 +3861,7 @@ function App(): ReactElement {
               </nav>
 
               {activeConfigTab === 'agents' && (
-              <section className="config-block">
+              <section className="config-block list-page">
                 <div className="section-title-row">
                   <div>
                     <strong>智能体配置</strong>
@@ -3801,11 +3872,12 @@ function App(): ReactElement {
                     <span>新增智能体</span>
                   </button>
                 </div>
+                <div className="list-page-body">
                 <div className="capability-table">
                   {draftConfig.agents.length === 0 ? (
                     <p className="empty-state">暂无智能体。系统会默认创建一个主智能体。</p>
                   ) : (
-                    draftConfig.agents.map((agent) => {
+                    pagedAgents.map((agent) => {
                       const defaultModel = draftConfig.model.models.find((model) => model.id === agent.defaultModelId);
                       return (
                         <div className="capability-row" key={agent.id}>
@@ -3848,6 +3920,15 @@ function App(): ReactElement {
                     })
                   )}
                 </div>
+                </div>
+                {renderLocalPagination({
+                  page: agentPage,
+                  totalPages: agentTotalPages,
+                  totalItems: draftConfig.agents.length,
+                  pageInput: agentPageInput,
+                  setPage: setAgentPage,
+                  setPageInput: setAgentPageInput,
+                })}
               </section>
               )}
 
@@ -3904,7 +3985,7 @@ function App(): ReactElement {
                     {archivedConversations.length === 0 ? (
                       <p className="empty-state">暂无已归档对话。</p>
                     ) : (
-                      archivedConversations.map(({ agentId, agentName, conversation }) => (
+                      pagedArchivedConversations.map(({ agentId, agentName, conversation }) => (
                         <div className="capability-row archived-conversation-row" key={`${agentId}-${conversation.id}`}>
                           <div>
                             <strong>{getConversationDisplayTitle(conversation, null)}</strong>
@@ -3926,6 +4007,14 @@ function App(): ReactElement {
                     )}
                   </div>
                 </div>
+                {renderLocalPagination({
+                  page: archivedConversationPage,
+                  totalPages: archivedConversationTotalPages,
+                  totalItems: archivedConversations.length,
+                  pageInput: archivedConversationPageInput,
+                  setPage: setArchivedConversationPage,
+                  setPageInput: setArchivedConversationPageInput,
+                })}
               </section>
               )}
 
@@ -4105,26 +4194,14 @@ function App(): ReactElement {
                     </>
                   )}
                 </div>
-                <PaginationBar
-                  summary={`第 ${modelPage} / ${modelTotalPages} 页，共 ${filteredModels.length} 条`}
-                  page={modelPage}
-                  totalPages={modelTotalPages}
-                  pageInput={modelPageInput}
-                  onPageInputChange={setModelPageInput}
-                  onPageInputCommit={() =>
-                    commitLocalPageInput(modelPageInput, modelTotalPages, setModelPage, setModelPageInput)
-                  }
-                  onPrevious={() => {
-                    const nextPage = Math.max(1, modelPage - 1);
-                    setModelPage(nextPage);
-                    setModelPageInput(String(nextPage));
-                  }}
-                  onNext={() => {
-                    const nextPage = Math.min(modelTotalPages, modelPage + 1);
-                    setModelPage(nextPage);
-                    setModelPageInput(String(nextPage));
-                  }}
-                />
+                {renderLocalPagination({
+                  page: modelPage,
+                  totalPages: modelTotalPages,
+                  totalItems: filteredModels.length,
+                  pageInput: modelPageInput,
+                  setPage: setModelPage,
+                  setPageInput: setModelPageInput,
+                })}
                 <div className="list-page-footer legacy-list-footer">
                   <span>已显示 {filteredModels.length} / {draftConfig.model.models.length} 个模型</span>
                   <button
@@ -4287,31 +4364,14 @@ function App(): ReactElement {
                   ))}
                 </div>
                 </div>
-                <PaginationBar
-                  summary={`第 ${capabilityPage} / ${capabilityTotalPages} 页，共 ${filteredCapabilities.length} 条`}
-                  page={capabilityPage}
-                  totalPages={capabilityTotalPages}
-                  pageInput={capabilityPageInput}
-                  onPageInputChange={setCapabilityPageInput}
-                  onPageInputCommit={() =>
-                    commitLocalPageInput(
-                      capabilityPageInput,
-                      capabilityTotalPages,
-                      setCapabilityPage,
-                      setCapabilityPageInput,
-                    )
-                  }
-                  onPrevious={() => {
-                    const nextPage = Math.max(1, capabilityPage - 1);
-                    setCapabilityPage(nextPage);
-                    setCapabilityPageInput(String(nextPage));
-                  }}
-                  onNext={() => {
-                    const nextPage = Math.min(capabilityTotalPages, capabilityPage + 1);
-                    setCapabilityPage(nextPage);
-                    setCapabilityPageInput(String(nextPage));
-                  }}
-                />
+                {renderLocalPagination({
+                  page: capabilityPage,
+                  totalPages: capabilityTotalPages,
+                  totalItems: filteredCapabilities.length,
+                  pageInput: capabilityPageInput,
+                  setPage: setCapabilityPage,
+                  setPageInput: setCapabilityPageInput,
+                })}
                 <div className="list-page-footer legacy-list-footer">
                   <span>已显示 {filteredCapabilities.length} / {draftConfig.capabilities.length} 个能力</span>
                   <button type="button" className="primary-action-button compact-button" onClick={() => setCapabilityEditor(createCapabilityConfig())}>

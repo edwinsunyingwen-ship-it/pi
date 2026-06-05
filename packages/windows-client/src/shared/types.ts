@@ -107,6 +107,8 @@ export interface AgentCapabilityCallLog {
 	toolName: string;
 	inputSummary?: string;
 	outputSummary?: string;
+	fullInput?: string;
+	fullOutput?: string;
 	status: AuditStatus;
 	startedAt?: string;
 	endedAt?: string;
