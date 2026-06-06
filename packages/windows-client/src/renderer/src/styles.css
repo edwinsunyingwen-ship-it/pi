@@ -4237,6 +4237,7 @@ select:focus {
   background: #fffdf8;
   border: 1px solid #e2e8f0;
   box-shadow: 0 8px 24px rgb(15 23 42 / 5%);
+  max-width: min(1440px, 96%);
 }
 
 .app-shell > .dashboard-grid .message-meta {
