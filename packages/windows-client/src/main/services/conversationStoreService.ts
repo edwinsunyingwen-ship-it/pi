@@ -1,7 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
-import type { ConversationStoreState, StoredAgentConversation, WorkspaceState } from "../../shared/types";
+import type {
+	ConversationAttachmentMeta,
+	ConversationStoreState,
+	ConversationTranscriptItem,
+	StoredAgentConversation,
+	WorkspaceState,
+} from "../../shared/types";
 
 export class ConversationStoreService {
 	private readonly storePath = join(app.getPath("userData"), "conversations.json");
@@ -88,21 +94,61 @@ export class ConversationStoreService {
 			archivedAt: typeof value.archivedAt === "string" ? value.archivedAt : null,
 			transcript: Array.isArray(value.transcript)
 				? value.transcript
-						.map((item) => {
-							if (!this.isRecord(item) || (item.role !== "user" && item.role !== "assistant")) {
-								return null;
-							}
-							return {
-								role: item.role,
-								text: typeof item.text === "string" ? item.text : "",
-								createdAt: typeof item.createdAt === "string" ? item.createdAt : now,
-							};
-						})
-						.filter((item): item is StoredAgentConversation["transcript"][number] => item !== null)
+						.map((item) => this.normalizeTranscriptItem(item, now))
+						.filter((item): item is ConversationTranscriptItem => item !== null)
 				: [],
 			draftMessage: typeof value.draftMessage === "string" ? value.draftMessage : "",
 			workspace: this.normalizeWorkspace(value.workspace),
 		};
+	}
+
+	private normalizeTranscriptItem(value: unknown, now: string): ConversationTranscriptItem | null {
+		if (!this.isRecord(value) || (value.role !== "user" && value.role !== "assistant")) {
+			return null;
+		}
+
+		const item: ConversationTranscriptItem = {
+			role: value.role,
+			text: typeof value.text === "string" ? value.text : "",
+			createdAt: typeof value.createdAt === "string" ? value.createdAt : now,
+		};
+		if (Array.isArray(value.attachments)) {
+			item.attachments = value.attachments
+				.map((attachment) => this.normalizeAttachment(attachment))
+				.filter((attachment): attachment is ConversationAttachmentMeta => attachment !== null);
+		}
+		return item;
+	}
+
+	private normalizeAttachment(value: unknown): ConversationAttachmentMeta | null {
+		if (!this.isRecord(value)) {
+			return null;
+		}
+
+		const kind = this.normalizeAttachmentKind(value.kind);
+		if (!kind) {
+			return null;
+		}
+
+		return {
+			id: typeof value.id === "string" && value.id.trim() ? value.id : crypto.randomUUID(),
+			name: typeof value.name === "string" && value.name.trim() ? value.name : "attachment",
+			mimeType: typeof value.mimeType === "string" ? value.mimeType : "application/octet-stream",
+			size: typeof value.size === "number" && Number.isFinite(value.size) && value.size >= 0 ? value.size : 0,
+			kind,
+			sourcePath: typeof value.sourcePath === "string" && value.sourcePath.trim() ? value.sourcePath : undefined,
+			readable: typeof value.readable === "boolean" ? value.readable : false,
+			truncated: typeof value.truncated === "boolean" ? value.truncated : false,
+			previewDataUrl:
+				typeof value.previewDataUrl === "string" && value.previewDataUrl.trim() ? value.previewDataUrl : undefined,
+		};
+	}
+
+	private normalizeAttachmentKind(value: unknown): ConversationAttachmentMeta["kind"] | null {
+		if (value === "image" || value === "text" || value === "document" || value === "file") {
+			return value;
+		}
+		return null;
 	}
 
 	private normalizeWorkspace(value: unknown): WorkspaceState {
