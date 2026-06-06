@@ -24,6 +24,8 @@ const api: WindowsClientApi = {
 	listWorkspaceFiles: (workspacePath) => ipcRenderer.invoke(IPC_CHANNELS.workspaceListFiles, workspacePath),
 	readWorkspaceFile: (relativePath, workspacePath) =>
 		ipcRenderer.invoke(IPC_CHANNELS.workspaceReadFile, relativePath, workspacePath),
+	openLocalPath: (path) => ipcRenderer.invoke(IPC_CHANNELS.localPathOpen, path),
+	showLocalPathInFolder: (path) => ipcRenderer.invoke(IPC_CHANNELS.localPathShowInFolder, path),
 	startAgentSession: (agentId, workspacePath) =>
 		ipcRenderer.invoke(IPC_CHANNELS.agentStartSession, agentId, workspacePath),
 	stopAgentSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.agentStopSession, sessionId),

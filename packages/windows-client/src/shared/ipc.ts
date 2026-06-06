@@ -16,6 +16,8 @@ export const IPC_CHANNELS = {
 	chooseWorkspace: "workspace:choose",
 	workspaceListFiles: "workspace:list-files",
 	workspaceReadFile: "workspace:read-file",
+	localPathOpen: "local-path:open",
+	localPathShowInFolder: "local-path:show-in-folder",
 	auditListLogs: "audit:list-logs",
 	conversationStoreGet: "conversation-store:get",
 	conversationStoreSave: "conversation-store:save",

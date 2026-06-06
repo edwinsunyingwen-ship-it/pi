@@ -195,6 +195,11 @@ export interface WorkspaceFileReadResult {
 	content: string;
 }
 
+export interface LocalPathOpenResult {
+	status: "opened" | "revealed";
+	path: string;
+}
+
 export type AgentCoreMode = "embedded-rpc" | "external-rpc";
 
 export type ModelAuthType = "env" | "oauth" | "none";
@@ -428,6 +433,8 @@ export interface WindowsClientApi {
 	saveConversationStore: (store: ConversationStoreState) => Promise<ConversationStoreState>;
 	listWorkspaceFiles: (workspacePath?: string | null) => Promise<WorkspaceFileListResult>;
 	readWorkspaceFile: (relativePath: string, workspacePath?: string | null) => Promise<WorkspaceFileReadResult>;
+	openLocalPath: (path: string) => Promise<LocalPathOpenResult>;
+	showLocalPathInFolder: (path: string) => Promise<LocalPathOpenResult>;
 	startAgentSession: (agentId?: string, workspacePath?: string | null) => Promise<AgentSession>;
 	stopAgentSession: (sessionId: string) => Promise<AgentSession>;
 	getAgentSessionState: (sessionId: string) => Promise<AgentSession | null>;

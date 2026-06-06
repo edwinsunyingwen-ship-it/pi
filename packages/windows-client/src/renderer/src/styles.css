@@ -1283,6 +1283,25 @@ dd {
   text-underline-offset: 2px;
 }
 
+.local-path-link {
+  background: transparent;
+  border: 0;
+  color: #235f8d;
+  cursor: pointer;
+  display: inline;
+  font: inherit;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.local-path-link:hover {
+  color: #164e43;
+}
+
 .markdown-message code {
   background: #f0eee9;
   border: 1px solid #e5ded5;

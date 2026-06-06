@@ -933,10 +933,126 @@ function getMarkdownText(token: Token): string {
 }
 
 function renderMarkdownText(text: string, key: string, searchQuery?: string): ReactNode {
+  const localPathSegments = splitLocalPathSegments(text);
+  if (localPathSegments) {
+    return (
+      <span key={key}>
+        {localPathSegments.map((segment, index) => {
+          const segmentKey = `${key}-local-path-${index}`;
+          if (segment.type === 'text') {
+            return renderMarkdownText(segment.text, segmentKey, searchQuery);
+          }
+          return (
+            <LocalPathLink key={segmentKey} path={segment.path} searchQuery={searchQuery}>
+              {segment.text}
+            </LocalPathLink>
+          );
+        })}
+      </span>
+    );
+  }
   if (!searchQuery) {
     return text;
   }
   return <span key={key}>{renderHighlightedText(text, searchQuery)}</span>;
+}
+
+interface LocalPathSegment {
+  type: 'text' | 'path';
+  text: string;
+  path?: string;
+}
+
+const localPathStartPattern = /(?:file:\/\/\/?|[A-Za-z]:[\\/]|\\\\[^\s\\/:*?"<>|]+\\[^\s\\/:*?"<>|]+\\)/g;
+const localPathHardTerminators = new Set(['\n', '\r', '\t', '`', '"', "'", '<', '>', '|', '*', '?']);
+const localPathTrailingPunctuation = /[.,;:!，。；：！、)\]}]+$/;
+
+function isLocalPathBoundary(text: string, index: number): boolean {
+  if (index <= 0) {
+    return true;
+  }
+  const previousChar = text[index - 1];
+  return previousChar === undefined || /\s|[(\[{`"']/.test(previousChar);
+}
+
+function findLocalPathEnd(text: string, startIndex: number): number {
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (localPathHardTerminators.has(char) || /[，。；：！、]/.test(char)) {
+      return index;
+    }
+  }
+  return text.length;
+}
+
+function trimLocalPathCandidate(candidate: string): string {
+  return candidate.trimEnd().replace(localPathTrailingPunctuation, '');
+}
+
+function splitLocalPathSegments(text: string): LocalPathSegment[] | null {
+  localPathStartPattern.lastIndex = 0;
+  const segments: LocalPathSegment[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = localPathStartPattern.exec(text)) !== null) {
+    if (!isLocalPathBoundary(text, match.index)) {
+      continue;
+    }
+    const rawEnd = findLocalPathEnd(text, match.index);
+    const rawCandidate = text.slice(match.index, rawEnd);
+    const pathText = trimLocalPathCandidate(rawCandidate);
+    if (!pathText) {
+      continue;
+    }
+    const pathEnd = match.index + pathText.length;
+    if (match.index > cursor) {
+      segments.push({ type: 'text', text: text.slice(cursor, match.index) });
+    }
+    segments.push({ type: 'path', text: pathText, path: pathText });
+    cursor = pathEnd;
+    localPathStartPattern.lastIndex = Math.max(pathEnd, match.index + match[0].length);
+  }
+
+  if (segments.length === 0) {
+    return null;
+  }
+  if (cursor < text.length) {
+    segments.push({ type: 'text', text: text.slice(cursor) });
+  }
+  return segments;
+}
+
+function isLocalPathText(text: string): boolean {
+  const segments = splitLocalPathSegments(text);
+  return Boolean(segments && segments.length === 1 && segments[0]?.type === 'path' && segments[0].text === text);
+}
+
+function LocalPathLink({
+  children,
+  path,
+  searchQuery,
+}: {
+  children: string;
+  path?: string;
+  searchQuery?: string;
+}): ReactElement {
+  const openPath = async (): Promise<void> => {
+    if (!path) {
+      return;
+    }
+    try {
+      await window.windowsClient.openLocalPath(path);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  return (
+    <button className="local-path-link" type="button" onClick={openPath} title="打开本地路径">
+      {searchQuery ? renderHighlightedText(children, searchQuery) : children}
+    </button>
+  );
 }
 
 function getTextAlign(align: Tokens.TableCell['align']): CSSProperties | undefined {
@@ -1003,12 +1119,26 @@ function renderMarkdownInlineTokens(tokens: Token[] | undefined, keyPrefix: stri
       case 'del':
         return [<del key={key}>{renderMarkdownInlineTokens(token.tokens, key, searchQuery)}</del>];
       case 'codespan':
+        if (isLocalPathText(token.text)) {
+          return [
+            <LocalPathLink key={key} path={token.text} searchQuery={searchQuery}>
+              {token.text}
+            </LocalPathLink>,
+          ];
+        }
         return [<code key={key}>{token.text}</code>];
       case 'br':
         return [<br key={key} />];
       case 'link': {
         if (!isSafeMarkdownUrl(token.href)) {
           return [renderMarkdownText(token.text, key, searchQuery)];
+        }
+        if (token.href.startsWith('file:')) {
+          return [
+            <LocalPathLink key={key} path={token.href} searchQuery={searchQuery}>
+              {token.text}
+            </LocalPathLink>,
+          ];
         }
         return [
           <a href={token.href} key={key} rel="noreferrer" target="_blank" title={token.title ?? undefined}>

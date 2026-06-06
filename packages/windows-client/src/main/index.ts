@@ -1,6 +1,7 @@
+import { access, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
 import type {
 	AgentConfig,
@@ -10,6 +11,7 @@ import type {
 	AuditLogQuery,
 	CapabilityConfig,
 	ClientVariableConfig,
+	LocalPathOpenResult,
 	ModelConfig,
 	ModelProfileConfig,
 } from "../shared/types";
@@ -31,6 +33,57 @@ const conversationStoreService = new ConversationStoreService();
 const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
 const mainDir = dirname(fileURLToPath(import.meta.url));
+
+function normalizeLocalPath(input: string): string {
+	const trimmedInput = input.trim();
+	if (!trimmedInput) {
+		throw new Error("Local path is required.");
+	}
+	if (trimmedInput.startsWith("file://")) {
+		return fileURLToPath(trimmedInput);
+	}
+	return trimmedInput;
+}
+
+async function openLocalPath(input: string): Promise<LocalPathOpenResult> {
+	const path = normalizeLocalPath(input);
+	let fileStat: Awaited<ReturnType<typeof stat>>;
+	try {
+		fileStat = await stat(path);
+	} catch {
+		const parentPath = dirname(path);
+		if (parentPath && parentPath !== path) {
+			await access(parentPath);
+			const errorMessage = await shell.openPath(parentPath);
+			if (errorMessage) {
+				throw new Error(errorMessage);
+			}
+			return { status: "revealed", path };
+		}
+		throw new Error(`Local path does not exist: ${path}`);
+	}
+	if (fileStat.isDirectory()) {
+		const errorMessage = await shell.openPath(path);
+		if (errorMessage) {
+			throw new Error(errorMessage);
+		}
+		return { status: "opened", path };
+	}
+
+	const errorMessage = await shell.openPath(path);
+	if (errorMessage) {
+		shell.showItemInFolder(path);
+		return { status: "revealed", path };
+	}
+	return { status: "opened", path };
+}
+
+async function showLocalPathInFolder(input: string): Promise<LocalPathOpenResult> {
+	const path = normalizeLocalPath(input);
+	await access(path);
+	shell.showItemInFolder(path);
+	return { status: "revealed", path };
+}
 
 function createWindow(): void {
 	const window = new BrowserWindow({
@@ -123,6 +176,8 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.workspaceReadFile, (_event, relativePath: string, workspacePath?: string | null) =>
 		workspaceFileService.readFile(relativePath, workspacePath),
 	);
+	ipcMain.handle(IPC_CHANNELS.localPathOpen, (_event, path: string) => openLocalPath(path));
+	ipcMain.handle(IPC_CHANNELS.localPathShowInFolder, (_event, path: string) => showLocalPathInFolder(path));
 	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, query?: AuditLogQuery) => auditLogger.listRecent(query));
 	ipcMain.handle(IPC_CHANNELS.conversationStoreGet, () => conversationStoreService.getStore());
 	ipcMain.handle(IPC_CHANNELS.conversationStoreSave, (_event, store) => conversationStoreService.saveStore(store));
