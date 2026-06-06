@@ -519,6 +519,13 @@ p {
   gap: 10px;
 }
 
+.floating-section-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 .workbench-shell {
   display: grid;
   gap: 16px;

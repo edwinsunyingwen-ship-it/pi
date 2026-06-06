@@ -139,6 +139,7 @@ const textAttachmentExtensions = new Set([
 ]);
 
 type AppMenuName = 'File' | 'Edit' | 'View' | 'Window' | 'Help';
+type AppSection = 'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs' | 'billing';
 
 interface AppMenuItem {
   label: string;
@@ -1394,9 +1395,7 @@ function App(): ReactElement {
   const [agentNotice, setAgentNotice] = useState<LocalNotice | null>(null);
   const [configNotice, setConfigNotice] = useState<LocalNotice | null>(null);
   const [modelEditorNotice, setModelEditorNotice] = useState<LocalNotice | null>(null);
-  const [activeSection, setActiveSection] = useState<'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs' | 'billing'>(
-    'workbench',
-  );
+  const [activeSection, setActiveSection] = useState<AppSection>('workbench');
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [conversationRevision, setConversationRevision] = useState(0);
@@ -1856,6 +1855,12 @@ function App(): ReactElement {
     };
     manualStoppedConversationIdsRef.current.delete(nextConversation.id);
     commitAgentConversation(selectedAgent.id, nextConversation);
+    setActiveSection('workbench');
+    setAgentNotice(null);
+  }
+
+  function closeFloatingSection(): void {
+    setActiveSection('workbench');
   }
 
   function selectConversation(conversationId: string): void {
@@ -3478,9 +3483,20 @@ function App(): ReactElement {
       <section className="dashboard-grid">
         {activeSection === 'search' && (
           <article className="panel wide-panel search-panel">
-            <div className="panel-heading">
-              <Search size={20} />
-              <h3>搜索</h3>
+            <div className="panel-heading with-action">
+              <div>
+                <Search size={20} />
+                <h3>搜索</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={closeFloatingSection}
+                aria-label="关闭搜索"
+                title="关闭"
+              >
+                <X size={18} />
+              </button>
             </div>
 
             <div className="search-toolbar">
@@ -3544,9 +3560,20 @@ function App(): ReactElement {
 
         {activeSection === 'billing' && (
           <article className="panel wide-panel">
-            <div className="panel-heading">
-              <FileText size={20} />
-              <h3>消费明细</h3>
+            <div className="panel-heading with-action">
+              <div>
+                <FileText size={20} />
+                <h3>消费明细</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={closeFloatingSection}
+                aria-label="关闭消费明细"
+                title="关闭"
+              >
+                <X size={18} />
+              </button>
             </div>
             <p className="empty-state">消费明细暂未接入，后续会汇总会话 token、模型价格和工具调用用量。</p>
           </article>
@@ -4659,10 +4686,21 @@ function App(): ReactElement {
                 <ListChecks size={20} />
                 <h3>操作日志</h3>
               </div>
-              <button type="button" className="icon-button" onClick={refreshAuditLogs}>
-                <RefreshCw size={16} />
-                <span>刷新</span>
-              </button>
+              <div className="floating-section-actions">
+                <button type="button" className="icon-button" onClick={refreshAuditLogs}>
+                  <RefreshCw size={16} />
+                  <span>刷新</span>
+                </button>
+                <button
+                  type="button"
+                  className="modal-close-button"
+                  onClick={closeFloatingSection}
+                  aria-label="关闭操作日志"
+                  title="关闭"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <p className="subtle-text">
               {auditPath ? `日志文件：${auditPath}` : '今天还没有操作日志。'}
