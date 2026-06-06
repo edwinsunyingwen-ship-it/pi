@@ -1932,7 +1932,6 @@ function App(): ReactElement {
           [agent.id]: nextActiveConversation.id,
         };
         setConversationMenuId(null);
-        openSettings('archived');
         persistConversationStore();
         setConversationRevision((revision) => revision + 1);
       },
@@ -1947,7 +1946,54 @@ function App(): ReactElement {
     selectedAgentIdRef.current = agentId;
     setSelectedAgentId(agentId);
     setActiveSection('workbench');
+    closeSettings();
+    persistConversationStore();
     setConversationRevision((revision) => revision + 1);
+  }
+
+  function deleteArchivedConversation(agentId: string, conversation: AgentConversationState): void {
+    const agent = configState?.config.agents.find((item) => item.id === agentId) ?? null;
+    requestConfirm({
+      tone: 'danger',
+      title: '彻底删除已归档对话',
+      message: `确认彻底删除“${getConversationDisplayTitle(conversation, agent)}”？此操作无法撤销。`,
+      confirmLabel: '彻底删除',
+      onConfirm: () => {
+        const existingConversations = agentConversationsRef.current[agentId] ?? [];
+        const nextConversations = existingConversations.filter((item) => item.id !== conversation.id);
+        let nextActiveConversationId = activeConversationIdsRef.current[agentId] ?? '';
+        const removedActiveConversation = nextActiveConversationId === conversation.id;
+
+        if (removedActiveConversation) {
+          const nextActiveConversation =
+            nextConversations.find((item) => !item.archivedAt) ??
+            nextConversations[0] ??
+            createAgentConversation(agent);
+          nextActiveConversationId = nextActiveConversation.id;
+          if (!nextConversations.some((item) => item.id === nextActiveConversation.id)) {
+            nextConversations.unshift(nextActiveConversation);
+          }
+        }
+
+        agentConversationsRef.current = {
+          ...agentConversationsRef.current,
+          [agentId]: nextConversations,
+        };
+        activeConversationIdsRef.current = {
+          ...activeConversationIdsRef.current,
+          [agentId]: nextActiveConversationId,
+        };
+        setAttachmentsByConversationId((current) => {
+          const { [conversation.id]: _removedAttachments, ...remainingAttachments } = current;
+          return remainingAttachments;
+        });
+        if (selectedAgentIdRef.current === agentId && removedActiveConversation) {
+          setActiveSection('workbench');
+        }
+        persistConversationStore();
+        setConversationRevision((revision) => revision + 1);
+      },
+    });
   }
 
   function openSearchResult(match: ConversationSearchMatch): void {
@@ -4212,6 +4258,13 @@ function App(): ReactElement {
                               onClick={() => openArchivedConversation(agentId, conversation.id)}
                             >
                               查看
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => deleteArchivedConversation(agentId, conversation)}
+                            >
+                              删除
                             </button>
                           </div>
                         </div>
