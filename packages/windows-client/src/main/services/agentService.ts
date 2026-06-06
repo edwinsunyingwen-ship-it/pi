@@ -67,8 +67,10 @@ export class AgentService {
 				effectiveWorkspacePath,
 			),
 		});
+		const runtimeSession = await this.adapter.getSessionState(startedSession.id);
 		const session: AgentSession = {
 			...startedSession,
+			...(runtimeSession ?? {}),
 			agentId: agent.id,
 			agentName: agent.name,
 			modelId: model.id,

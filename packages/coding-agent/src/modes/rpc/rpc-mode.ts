@@ -429,6 +429,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "get_state": {
+				const activeToolNames = new Set(session.getActiveToolNames());
+				const tools = session
+					.getAllTools()
+					.filter((tool) => activeToolNames.has(tool.name))
+					.map((tool) => ({
+						name: tool.name,
+						description: tool.description,
+						source: tool.sourceInfo.source,
+					}));
 				const state: RpcSessionState = {
 					model: session.model,
 					thinkingLevel: session.thinkingLevel,
@@ -442,6 +451,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					autoCompactionEnabled: session.autoCompactionEnabled,
 					messageCount: session.messages.length,
 					pendingMessageCount: session.pendingMessageCount,
+					contextPreview: {
+						systemPrompt: session.systemPrompt,
+						tools,
+						messageCount: session.messages.length,
+					},
 				};
 				return success(id, "get_state", state);
 			}

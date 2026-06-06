@@ -31,6 +31,8 @@ import {
 import type {
   AgentConfig,
   AgentKnowledgeItem,
+  AgentModelContextPreview,
+  AgentModelInteractionLog,
   ConversationStoreState,
   AgentRuleConfig,
   AgentSession,
@@ -776,19 +778,41 @@ function truncateInlineText(value: string, maxLength = 120): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
 }
 
-function formatKnowledgeContextPreview(items: AgentKnowledgeItem[] | undefined): string[] {
-  if (!items?.length) {
-    return ['知识：未配置'];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractContextPreviewFromModelInteractions(
+  interactions: AgentModelInteractionLog[] | undefined,
+): AgentModelContextPreview | undefined {
+  const contextInteraction = [...(interactions ?? [])].reverse().find((interaction) => interaction.kind === 'context');
+  if (!contextInteraction?.fullInput) {
+    return undefined;
   }
-  return [
-    '知识：',
-    ...items.map((item) => {
-      if (item.type === 'document') {
-        return `- ${item.title || '未命名知识'}（文档）：路径：${item.filePath || '未选择'}；概述：${item.overview || '未填写'}`;
-      }
-      return `- ${item.title || '未命名知识'}（纯文本）：\n${item.content || '未填写'}`;
-    }),
-  ];
+
+  try {
+    const parsed = JSON.parse(contextInteraction.fullInput) as unknown;
+    const context = isRecord(parsed) && isRecord(parsed.context) ? parsed.context : undefined;
+    if (!context) {
+      return undefined;
+    }
+    const systemPrompt = typeof context.systemPrompt === 'string' ? context.systemPrompt : '';
+    const messageCount = Array.isArray(context.messages) ? context.messages.length : 0;
+    const tools = Array.isArray(context.tools)
+      ? context.tools
+          .filter((tool): tool is Record<string, unknown> => isRecord(tool))
+          .map((tool) => ({
+            name: typeof tool.name === 'string' ? tool.name : '',
+            description: typeof tool.description === 'string' ? tool.description : '',
+            source: typeof tool.source === 'string' ? tool.source : '',
+          }))
+          .filter((tool) => tool.name.length > 0)
+      : [];
+
+    return { systemPrompt, tools, messageCount };
+  } catch {
+    return undefined;
+  }
 }
 
 function padDatePart(value: number): string {
@@ -1573,6 +1597,41 @@ function App(): ReactElement {
 
   useEffect(() => {
     if (
+      !contextPanelOpen ||
+      !selectedAgent ||
+      !session ||
+      session.state === 'stopped' ||
+      session.contextPreview?.systemPrompt.trim()
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const currentSession = await window.windowsClient.getAgentSessionState(session.id);
+        if (cancelled || !currentSession) {
+          return;
+        }
+        updateConversationSession(selectedAgent.id, selectedConversation.id, {
+          ...currentSession,
+          agentId: session.agentId,
+          agentName: session.agentName,
+          modelId: session.modelId,
+          workspacePath: session.workspacePath,
+        });
+      } catch {
+        // Context preview is informational; keep the active conversation usable if refresh fails.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contextPanelOpen, selectedAgent?.id, selectedConversation.id, session?.id, session?.state, session?.contextPreview]);
+
+  useEffect(() => {
+    if (
       !searchNavigationTarget ||
       activeSection !== 'workbench' ||
       searchNavigationTarget.conversationId !== selectedConversation.id
@@ -1635,6 +1694,17 @@ function App(): ReactElement {
       draftMessage,
       workspace: activeWorkspace,
       ...patch,
+    });
+  }
+
+  function updateConversationSession(agentId: string, conversationId: string, nextSession: AgentSession | null): void {
+    const existing = agentConversationsRef.current[agentId]?.find((item) => item.id === conversationId);
+    if (!existing) {
+      return;
+    }
+    commitAgentConversation(agentId, {
+      ...existing,
+      session: nextSession,
     });
   }
 
@@ -2917,14 +2987,21 @@ function App(): ReactElement {
       { role: 'assistant' as const, text: result.responseText, createdAt: result.createdAt },
     ];
     const currentSession = await window.windowsClient.getAgentSessionState(messageSession.id);
+    const runtimePreview = currentSession?.contextPreview;
+    const contextPreview = runtimePreview?.systemPrompt.trim()
+      ? runtimePreview
+      : extractContextPreviewFromModelInteractions(result.modelInteractions);
     const nextSession = currentSession
       ? {
           ...currentSession,
           agentId: messageSession.agentId,
           agentName: messageSession.agentName,
           modelId: messageSession.modelId,
+          contextPreview,
         }
-      : currentSession;
+      : contextPreview
+        ? { ...messageSession, contextPreview }
+        : currentSession;
     commitAgentConversation(messageAgent.id, {
       ...messageConversation,
       session: nextSession,
@@ -2969,44 +3046,14 @@ function App(): ReactElement {
       !selectedConversation.archivedAt,
   );
   const selectedAgentModel = draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId);
-  const selectedAgentCapabilities = draftConfig?.capabilities.filter((capability) =>
-    selectedAgent?.capabilityIds.includes(capability.id),
-  ) ?? [];
-  const selectedAgentChildAgents = draftConfig?.agents.filter((agent) =>
-    selectedAgent?.childAgentIds.includes(agent.id),
-  ) ?? [];
   const selectedAgentTaskTemplates = selectedAgent?.taskTemplates.filter((template) => template.enabled) ?? [];
-  const promptContextPreview = useMemo(() => {
-    const capabilityNames = selectedAgentCapabilities.map((capability) => capability.name).filter(Boolean);
-    const childAgentNames = selectedAgentChildAgents.map((agent) => agent.name).filter(Boolean);
-    const taskNames = selectedAgentTaskTemplates.map((template) => template.name).filter(Boolean);
-    return [
-      `智能体：${selectedAgent?.name ?? '未选择'}`,
-      `类型：${selectedAgent ? agentTypeLabels[selectedAgent.type] : '未选择'}`,
-      `描述：${selectedAgent?.description || '未填写'}`,
-      `角色定位：${selectedAgent?.rules.role || '未填写'}`,
-      `工作目标：${selectedAgent?.rules.goals || '未填写'}`,
-      `处理流程：${selectedAgent?.rules.process || '未填写'}`,
-      `输出格式：${selectedAgent?.rules.outputFormat || '未填写'}`,
-      `工作区：${activeWorkspace.path ?? '未选择'}`,
-      `默认模型：${formatModelName(selectedAgentModel)}`,
-      `绑定能力：${capabilityNames.length > 0 ? capabilityNames.join('、') : '未绑定'}`,
-      `子智能体：${childAgentNames.length > 0 ? childAgentNames.join('、') : '未配置'}`,
-      `常规任务：${taskNames.length > 0 ? taskNames.join('、') : '未配置'}`,
-      ...formatKnowledgeContextPreview(selectedAgent?.knowledgeItems),
-      selectedFile ? `当前预览文件：${selectedFile.relativePath}` : '当前预览文件：未选择',
-      '项目指令：Pi 会根据当前工作区自动发现并读取 AGENTS.md、CLAUDE.md 等项目上下文文件。',
-      '说明：这里展示会补充到 Pi system prompt 的产品配置摘要；Tools / Skills 只有接入为 Pi 工具后才会被真实调用。',
-    ].join('\n');
-  }, [
-    activeWorkspace.path,
-    selectedAgent,
-    selectedAgentCapabilities,
-    selectedAgentChildAgents,
-    selectedAgentTaskTemplates,
-    selectedAgentModel,
-    selectedFile,
-  ]);
+  const runtimeContextPreview = session?.contextPreview;
+  const runtimeTools = runtimeContextPreview?.tools ?? [];
+  const runtimePromptContextPreview = runtimeContextPreview?.systemPrompt.trim()
+    ? runtimeContextPreview.systemPrompt
+    : sessionReady
+      ? '当前会话尚未返回运行时上下文预览。'
+      : '启动当前智能体会话后显示真实运行时上下文预览。';
   const modelEditorPreset = modelEditor ? findProviderPreset(modelEditor.provider) : undefined;
   const modelEditorRequirements = modelEditor
     ? getProviderRequirements(modelEditor)
@@ -3603,17 +3650,15 @@ function App(): ReactElement {
                     <strong>{formatModelName(selectedAgentModel)}</strong>
                   </div>
                   <div className="context-summary">
-                    <small>可用能力</small>
-                    <strong>{selectedAgentCapabilities.length} 个</strong>
+                    <small>运行时工具</small>
+                    <strong>{runtimeTools.length} 个</strong>
                     <span>
-                      {selectedAgentCapabilities.length === 0
-                        ? '暂未绑定 Tools / Skills'
-                        : selectedAgentCapabilities.map((capability) => capability.name).join('、')}
+                      {runtimeTools.length === 0 ? '当前 runtime 未暴露工具' : runtimeTools.map((tool) => tool.name).join('、')}
                     </span>
                   </div>
                   <div className="prompt-context-preview">
-                    <small>本次 Prompt 上下文预览</small>
-                    <pre>{promptContextPreview}</pre>
+                    <small>运行时 system prompt 预览</small>
+                    <pre>{runtimePromptContextPreview}</pre>
                   </div>
                   <div className="file-panel-actions">
                     <button type="button" className="quiet-button compact-button" onClick={() => refreshWorkspaceFiles()}>

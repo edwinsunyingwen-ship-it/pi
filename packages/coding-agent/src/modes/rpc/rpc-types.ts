@@ -101,6 +101,19 @@ export interface RpcSessionState {
 	autoCompactionEnabled: boolean;
 	messageCount: number;
 	pendingMessageCount: number;
+	contextPreview: RpcModelContextPreview;
+}
+
+export interface RpcModelContextPreview {
+	systemPrompt: string;
+	tools: RpcModelContextTool[];
+	messageCount: number;
+}
+
+export interface RpcModelContextTool {
+	name: string;
+	description: string;
+	source: string;
 }
 
 // ============================================================================

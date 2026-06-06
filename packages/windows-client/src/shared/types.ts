@@ -44,6 +44,19 @@ export interface AgentSession {
 	agentName?: string;
 	modelId?: string;
 	workspacePath?: string | null;
+	contextPreview?: AgentModelContextPreview;
+}
+
+export interface AgentModelContextPreview {
+	systemPrompt: string;
+	tools: AgentModelContextTool[];
+	messageCount: number;
+}
+
+export interface AgentModelContextTool {
+	name: string;
+	description: string;
+	source: string;
 }
 
 export interface AgentToolInfo {

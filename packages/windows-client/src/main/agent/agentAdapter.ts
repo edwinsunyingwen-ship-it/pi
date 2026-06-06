@@ -9,6 +9,7 @@ import type {
 	AgentCapabilityCallLog,
 	AgentImageContent,
 	AgentMessageResult,
+	AgentModelContextPreview,
 	AgentModelInteractionLog,
 	AgentSession,
 	AgentToolInfo,
@@ -78,6 +79,11 @@ type RpcEvent = {
 	payload?: unknown;
 	reasoning?: string;
 	errorMessage?: string;
+};
+
+type RpcSessionStateData = {
+	isStreaming?: boolean;
+	contextPreview?: AgentModelContextPreview;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -225,7 +231,27 @@ export class RpcAgentAdapter implements AgentAdapter {
 	}
 
 	async getSessionState(sessionId: string): Promise<AgentSession | null> {
-		return this.sessions.get(sessionId)?.session ?? null;
+		const state = this.sessions.get(sessionId);
+		if (!state) {
+			return null;
+		}
+		if (state.process.exitCode !== null) {
+			return state.session;
+		}
+
+		try {
+			const response = await this.sendCommand(state, { type: "get_state" });
+			const rpcState = this.normalizeRpcSessionState(response.data);
+			const nextSession: AgentSession = {
+				...state.session,
+				state: state.session.state === "stopped" ? "stopped" : rpcState.isStreaming ? "running" : "idle",
+				contextPreview: rpcState.contextPreview,
+			};
+			state.session = nextSession;
+			return nextSession;
+		} catch {
+			return state.session;
+		}
 	}
 
 	async listAvailableTools(): Promise<AgentToolInfo[]> {
@@ -1198,6 +1224,39 @@ export default function (pi) {
 
 			state.process.stdin.write(payload, "utf8");
 		});
+	}
+
+	private normalizeRpcSessionState(value: unknown): RpcSessionStateData {
+		if (!this.isRecord(value)) {
+			return {};
+		}
+
+		const contextPreview = this.normalizeModelContextPreview(value.contextPreview);
+		return {
+			isStreaming: typeof value.isStreaming === "boolean" ? value.isStreaming : undefined,
+			contextPreview,
+		};
+	}
+
+	private normalizeModelContextPreview(value: unknown): AgentModelContextPreview | undefined {
+		if (!this.isRecord(value)) {
+			return undefined;
+		}
+
+		const systemPrompt = typeof value.systemPrompt === "string" ? value.systemPrompt : "";
+		const messageCount = typeof value.messageCount === "number" ? value.messageCount : 0;
+		const tools = Array.isArray(value.tools)
+			? value.tools
+					.filter((tool): tool is Record<string, unknown> => this.isRecord(tool))
+					.map((tool) => ({
+						name: typeof tool.name === "string" ? tool.name : "",
+						description: typeof tool.description === "string" ? tool.description : "",
+						source: typeof tool.source === "string" ? tool.source : "",
+					}))
+					.filter((tool) => tool.name.length > 0)
+			: [];
+
+		return { systemPrompt, tools, messageCount };
 	}
 
 	private waitForAgentEnd(state: RpcProcessSession, timeoutMs = 180000): Promise<RpcEvent[]> {
