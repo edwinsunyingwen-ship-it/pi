@@ -4103,6 +4103,15 @@ function App(): ReactElement {
                 <span>返回</span>
               </button>
             </div>
+            <button
+              type="button"
+              className="modal-close-button"
+              onClick={closeSettings}
+              aria-label="关闭配置中心"
+              title="关闭"
+            >
+              <X size={18} />
+            </button>
           </div>
           {configNotice && <InlineNotice tone={configNotice.tone} text={configNotice.text} />}
           {draftConfig && (

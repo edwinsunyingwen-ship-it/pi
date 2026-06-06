@@ -4533,6 +4533,10 @@ select:focus {
   pointer-events: none;
 }
 
+.settings-panel > .panel-heading > .modal-close-button {
+  -webkit-app-region: no-drag;
+}
+
 .hint-icon-button {
   background: #f3f6fb;
   border: 1px solid #e5eaf0;
