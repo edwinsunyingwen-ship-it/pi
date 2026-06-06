@@ -91,7 +91,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 
 		expect(session.getAllTools()).toEqual([]);
 		expect(session.getActiveToolNames()).toEqual([]);
-		expect(session.systemPrompt).toContain("Available tools:\n(none)");
+		expect(session.systemPrompt).toContain("Core Available Tools:\n(none)");
 		session.dispose();
 	});
 
@@ -112,7 +112,8 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 		});
 
 		expect(session.getActiveToolNames()).toEqual([]);
-		expect(session.systemPrompt).toContain("Available tools:\n(none)");
+		expect(session.systemPrompt).toContain("Core Available Tools:\n(none)");
+		expect(session.systemPrompt).toContain("Custom Available Tools:\n(none)");
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
 	});

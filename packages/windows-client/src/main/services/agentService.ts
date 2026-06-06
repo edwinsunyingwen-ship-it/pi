@@ -674,7 +674,17 @@ export class AgentService {
 		childAgents: AgentConfig[],
 		workspacePath: string | null,
 	): string {
-		const lines = [
+		return this.buildStructuredAgentAppendSystemPrompt(agent, model, capabilities, childAgents, workspacePath);
+	}
+
+	private buildStructuredAgentAppendSystemPrompt(
+		agent: AgentConfig,
+		model: ModelProfileConfig,
+		capabilities: CapabilityConfig[],
+		childAgents: AgentConfig[],
+		workspacePath: string | null,
+	): string {
+		return [
 			"# Windows 客户端智能体配置",
 			"",
 			"以下内容来自 Windows 客户端的可视化配置，用于补充 Pi 内核默认 system prompt。",
@@ -708,80 +718,150 @@ export class AgentService {
 			"- 只有在需要创建/写入文件且无法从用户要求、附件路径或上下文推断输出目录时，才要求用户选择工作区或指定输出位置。",
 			"- 不要声称已经读取未实际读取的文件；依据不足时说明需要用户选择文件或补充材料。",
 			"",
-			"## 已绑定业务能力",
-		];
-
-		if (capabilities.length === 0) {
-			lines.push("- 未绑定已启用的 Tools / Skills。");
-		} else {
-			for (const capability of capabilities) {
-				const target =
-					capability.content ||
-					capability.endpoint ||
-					capability.command ||
-					capability.description ||
-					"未配置能力内容";
-				lines.push(
-					`- ${capability.name}：${capability.type} / ${capability.category || "未分类"}；说明：${capability.description || "未填写"}；内容：${target}`,
-				);
-				if (capability.advancedConfig.trim()) {
-					lines.push(`  - 高级配置：${capability.advancedConfig}`);
-				}
-			}
-		}
-
-		lines.push(
-			"",
-			"注意：上面的业务能力是产品配置说明。只有当 Pi 工具列表中实际存在对应工具时才可以直接调用；否则请把它们作为业务背景和任务规划依据。",
-			"",
-			"## 知识",
-		);
-
-		if (agent.knowledgeItems.length === 0) {
-			lines.push("- 暂未配置知识。");
-		} else {
-			for (const item of agent.knowledgeItems) {
-				if (item.type === "document") {
-					lines.push(
-						`- ${item.title}：文档；路径：${item.filePath || "未选择"}；概述：${item.overview || "未填写"}`,
-					);
-				} else {
-					lines.push(`- ${item.title}：纯文本`, item.content || "未填写");
-				}
-			}
-		}
-
-		lines.push("", "## 可调度子智能体");
-
-		if (childAgents.length === 0) {
-			lines.push("- 暂未配置子智能体。");
-		} else {
-			for (const childAgent of childAgents) {
-				lines.push(`- ${childAgent.name}：${childAgent.description || "未填写描述"}`);
-			}
-		}
-
-		lines.push("", "## 常规任务模板");
-
-		const enabledTaskTemplates = agent.taskTemplates.filter((template) => template.enabled);
-		if (enabledTaskTemplates.length === 0) {
-			lines.push("- 暂未配置常规任务模板。");
-		} else {
-			for (const template of enabledTaskTemplates) {
-				lines.push(
-					`- ${template.name}：${template.description || "未填写说明"}；需要材料：${template.expectedInputs || "按用户输入判断"}；执行要求：${template.prompt || "未填写"}`,
-				);
-			}
-		}
-
-		lines.push(
+			...this.formatCapabilitiesForPrompt(capabilities),
+			...this.formatKnowledgeForPrompt(agent),
+			...this.formatChildAgentsForPrompt(childAgents),
+			...this.formatTaskTemplatesForPrompt(agent),
 			"",
 			"## 工作方式补充",
 			"- 使用中文与用户沟通，除非用户明确要求其他语言。",
 			"- 回答时优先围绕当前智能体职责、当前工作区和用户明确选择的上下文。",
 			"- 如果任务适合拆给子智能体，先说明拆分建议；当前版本还未实现真实子智能体自动调度时，不要假装已经完成调度。",
-		);
+		].join("\n");
+	}
 
-		return lines.join("\n");
+	private formatCapabilitiesForPrompt(capabilities: CapabilityConfig[]): string[] {
+		const lines = [
+			"## 已绑定业务能力",
+			"",
+			"这些能力来自用户配置，可能是工具、技能、命令、MCP、浏览器或业务说明。只有在 Pi 工具列表中实际存在对应工具时才可以直接调用；否则把它们作为业务背景、命令线索或任务规划依据。",
+		];
+		if (capabilities.length === 0) {
+			lines.push("", "未绑定已启用的业务能力。");
+			return lines;
+		}
+		for (const [index, capability] of capabilities.entries()) {
+			this.appendCapabilityPromptSection(lines, capability, index);
+		}
+		return lines;
+	}
+
+	private appendCapabilityPromptSection(lines: string[], capability: CapabilityConfig, index: number): void {
+		const target =
+			capability.content || capability.endpoint || capability.command || capability.description || "未配置能力内容";
+		lines.push("", `### ${index + 1}. ${capability.name || capability.id}`, "");
+		lines.push(
+			`- 类型：${capability.type}`,
+			`- 分类：${capability.category || "未分类"}`,
+			`- 执行方式：${capability.executionMode}`,
+			`- 直接工具名：${capability.toolName || this.getCapabilityCallableName(capability) || "未配置"}`,
+			`- 调用状态：${this.getCapabilityPromptStatus(capability)}`,
+			`- 说明：${capability.description || "未填写"}`,
+		);
+		if (capability.useWhen.trim()) {
+			lines.push("", "#### Use When", capability.useWhen);
+		}
+		if (capability.avoidWhen.trim()) {
+			lines.push("", "#### Do Not Use When", capability.avoidWhen);
+		}
+		lines.push("", "#### Content", target);
+		if (capability.advancedConfig.trim()) {
+			lines.push("", "#### Advanced Config", capability.advancedConfig);
+		}
+		if (capability.command.trim()) {
+			lines.push("", "#### Command", "```bash", capability.command, "```");
+		}
+		if (capability.type === "browser") {
+			lines.push(
+				"",
+				"#### Browser Config",
+				`- 模式：${capability.browserMode || "builtin"}`,
+				`- 允许域名：${capability.browserAllowedDomains?.join(", ") || "不限制"}`,
+				`- 禁止域名：${capability.browserBlockedDomains?.join(", ") || "无"}`,
+				`- 允许截图：${capability.browserAllowScreenshots ?? false}`,
+				`- 允许下载：${capability.browserAllowDownloads ?? false}`,
+				`- 敏感操作需确认：${capability.browserRequireConfirmation ?? true}`,
+				`- 最大步骤：${capability.browserMaxSteps ?? "未配置"}`,
+				`- 超时：${capability.browserTimeoutMs ?? "未配置"}ms`,
+			);
+		}
+	}
+
+	private formatKnowledgeForPrompt(agent: AgentConfig): string[] {
+		const lines = ["", "## 知识"];
+		if (agent.knowledgeItems.length === 0) {
+			lines.push("- 暂未配置知识。");
+			return lines;
+		}
+		for (const item of agent.knowledgeItems) {
+			if (item.type === "document") {
+				lines.push(`- ${item.title}：文档；路径：${item.filePath || "未选择"}；概述：${item.overview || "未填写"}`);
+			} else {
+				lines.push(`- ${item.title}：纯文本`, item.content || "未填写");
+			}
+		}
+		return lines;
+	}
+
+	private formatChildAgentsForPrompt(childAgents: AgentConfig[]): string[] {
+		const lines = ["", "## 可调度子智能体"];
+		if (childAgents.length === 0) {
+			lines.push("- 暂未配置子智能体。");
+			return lines;
+		}
+		for (const childAgent of childAgents) {
+			lines.push(`- ${childAgent.name}：${childAgent.description || "未填写描述"}`);
+		}
+		return lines;
+	}
+
+	private formatTaskTemplatesForPrompt(agent: AgentConfig): string[] {
+		const lines = ["", "## 常规任务模板"];
+		const enabledTaskTemplates = agent.taskTemplates.filter((template) => template.enabled);
+		if (enabledTaskTemplates.length === 0) {
+			lines.push("- 暂未配置常规任务模板。");
+			return lines;
+		}
+		for (const [index, template] of enabledTaskTemplates.entries()) {
+			lines.push(
+				"",
+				`### ${index + 1}. ${template.name}`,
+				`- 说明：${template.description || "未填写说明"}`,
+				`- 需要材料：${template.expectedInputs || "按用户输入判断"}`,
+				"#### 执行要求",
+				template.prompt || "未填写",
+			);
+		}
+		return lines;
+	}
+
+	private getCapabilityCallableName(capability: CapabilityConfig): string {
+		if (capability.executionMode === "http" && (capability.type === "tool" || capability.type === "http")) {
+			return this.normalizePromptToolName(capability.toolName || capability.name || "http_tool");
+		}
+		if (capability.type === "mcp" && capability.mcpTools.some((tool) => tool.enabled && tool.name.trim())) {
+			return "MCP bridge tools";
+		}
+		if (capability.type === "browser") {
+			return "browser_*";
+		}
+		return "";
+	}
+
+	private getCapabilityPromptStatus(capability: CapabilityConfig): string {
+		if (this.getCapabilityCallableName(capability)) {
+			return "存在可映射的 Pi 工具时可直接调用；否则按业务背景或命令线索处理。";
+		}
+		if (capability.command.trim()) {
+			return "这是命令型能力；需要通过 shell/命令工具执行，并先确认本地已安装和已配置。";
+		}
+		return "未映射为直接工具；作为业务背景和任务规划依据。";
+	}
+
+	private normalizePromptToolName(value: string): string {
+		return (value || "http_tool")
+			.replace(/[^a-zA-Z0-9_-]/g, "_")
+			.replace(/^([^a-zA-Z_])/, "_$1")
+			.slice(0, 64);
 	}
 }

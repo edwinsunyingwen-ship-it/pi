@@ -11,7 +11,8 @@ describe("buildSystemPrompt", () => {
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("Available tools:\n(none)");
+			expect(prompt).toContain("Core Available Tools:\n(none)");
+			expect(prompt).toContain("Custom Available Tools:\n(none)");
 		});
 
 		test("shows file paths guideline even with no tools", () => {
@@ -44,6 +45,8 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("- bash:");
 			expect(prompt).toContain("- edit:");
 			expect(prompt).toContain("- write:");
+			expect(prompt).toContain("Core Available Tools:");
+			expect(prompt).toContain("Custom Available Tools:\n(none)");
 		});
 	});
 
@@ -60,6 +63,7 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain("- dynamic_tool: Run dynamic test behavior");
+			expect(prompt).toContain("Custom Available Tools:");
 		});
 
 		test("omits custom tools from available tools section when promptSnippet is not provided", () => {
@@ -85,6 +89,7 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain("- Use dynamic_tool for project summaries.");
+			expect(prompt).toContain("Custom Tool Guidelines:");
 		});
 
 		test("deduplicates and trims promptGuidelines", () => {

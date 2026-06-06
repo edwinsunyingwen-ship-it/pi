@@ -24,6 +24,8 @@ export interface BuildSystemPromptOptions {
 	skills?: Skill[];
 }
 
+const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const {
@@ -88,8 +90,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	// A tool appears in Available tools only when the caller provides a one-line snippet.
 	const tools = selectedTools || ["read", "bash", "edit", "write"];
 	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
-	const toolsList =
-		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
+	const coreTools = visibleTools.filter((name) => BUILTIN_TOOL_NAMES.has(name));
+	const customTools = visibleTools.filter((name) => !BUILTIN_TOOL_NAMES.has(name));
+	const formatToolsList = (names: string[]): string =>
+		names.length > 0 ? names.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
+	const coreToolsList = formatToolsList(coreTools);
+	const customToolsList = formatToolsList(customTools);
 
 	// Build guidelines based on which tools are actually available
 	const guidelinesList: string[] = [];
@@ -115,11 +121,19 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
 	}
 
-	for (const guideline of promptGuidelines ?? []) {
+	const customGuidelines: string[] = [];
+	const customGuidelinesSet = new Set<string>();
+	const addCustomGuideline = (guideline: string): void => {
 		const normalized = guideline.trim();
-		if (normalized.length > 0) {
-			addGuideline(normalized);
+		if (normalized.length === 0 || customGuidelinesSet.has(normalized)) {
+			return;
 		}
+		customGuidelinesSet.add(normalized);
+		customGuidelines.push(normalized);
+	};
+
+	for (const guideline of promptGuidelines ?? []) {
+		addCustomGuideline(guideline);
 	}
 
 	// Always include these
@@ -127,16 +141,23 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	addGuideline("Show file paths clearly when working with files");
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
+	const customGuidelinesSection =
+		customGuidelines.length > 0
+			? `\n\nCustom Tool Guidelines:\n${customGuidelines.map((g) => `- ${g}`).join("\n")}`
+			: "";
 
 	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
-Available tools:
-${toolsList}
+Core Available Tools:
+${coreToolsList}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.
+Custom Available Tools:
+${customToolsList}
+
+Custom tools and project-specific commands are listed in "Custom Available Tools" or in appended project configuration sections below. Only tools listed as directly callable should be invoked as tools.
 
 Guidelines:
-${guidelines}
+${guidelines}${customGuidelinesSection}
 
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
 - Main documentation: ${readmePath}
