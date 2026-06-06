@@ -11,6 +11,7 @@ import type {
 	AgentMessageResult,
 	AgentModelContextPreview,
 	AgentModelInteractionLog,
+	AgentProgressEvent,
 	AgentSession,
 	AgentToolInfo,
 	CapabilityConfig,
@@ -90,7 +91,12 @@ type JsonRecord = Record<string, unknown>;
 
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
-	sendUserMessage(sessionId: string, message: string, images?: AgentImageContent[]): Promise<AgentMessageResult>;
+	sendUserMessage(
+		sessionId: string,
+		message: string,
+		images?: AgentImageContent[],
+		onProgress?: (event: AgentProgressEvent) => void,
+	): Promise<AgentMessageResult>;
 	stopSession(sessionId: string): Promise<AgentSession>;
 	getSessionState(sessionId: string): Promise<AgentSession | null>;
 	listAvailableTools(): Promise<AgentToolInfo[]>;
@@ -112,6 +118,8 @@ interface RpcProcessSession {
 		}
 	>;
 	events: RpcEvent[];
+	progressEvents: AgentProgressEvent[];
+	progressHandler?: (event: AgentProgressEvent) => void;
 }
 
 export class RpcAgentAdapter implements AgentAdapter {
@@ -134,6 +142,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			stderr: "",
 			pending: new Map(),
 			events: [],
+			progressEvents: [],
 		};
 
 		this.attachJsonlReader(state);
@@ -179,6 +188,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 		sessionId: string,
 		message: string,
 		images?: AgentImageContent[],
+		onProgress?: (event: AgentProgressEvent) => void,
 	): Promise<AgentMessageResult> {
 		const state = this.sessions.get(sessionId);
 		if (!state) {
@@ -188,9 +198,24 @@ export class RpcAgentAdapter implements AgentAdapter {
 		state.session = { ...state.session, state: "running" };
 
 		state.events = [];
+		state.progressEvents = [];
+		state.progressHandler = onProgress;
+		const startedAt = new Date().toISOString();
+		this.emitProgress(state, {
+			sessionId,
+			timestamp: startedAt,
+			title: "开始处理用户问题",
+			detail: "正在准备上下文、模型和可用工具。",
+			status: "running",
+		});
 		const waitForEnd = this.waitForAgentEnd(state);
-		await this.sendCommand(state, { type: "prompt", message, images });
-		const events = await waitForEnd;
+		let events: RpcEvent[];
+		try {
+			await this.sendCommand(state, { type: "prompt", message, images });
+			events = await waitForEnd;
+		} finally {
+			state.progressHandler = undefined;
+		}
 		const assistantError = this.extractAssistantError(events);
 		if (assistantError) {
 			state.session = { ...state.session, state: "idle" };
@@ -205,13 +230,27 @@ export class RpcAgentAdapter implements AgentAdapter {
 			throw new Error("Pi RPC 已完成本轮处理，但没有收到模型返回的文本内容。");
 		}
 		state.session = { ...state.session, state: "idle" };
+		const endedAt = new Date().toISOString();
+		const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+		this.emitProgress(state, {
+			sessionId,
+			timestamp: endedAt,
+			title: "处理完成",
+			detail: `已生成最终回复，共耗时 ${this.formatDuration(durationMs)}。`,
+			status: "success",
+			durationMs,
+		});
 
 		return {
 			sessionId,
 			responseText: responseText.trim(),
-			createdAt: new Date().toISOString(),
+			createdAt: endedAt,
+			startedAt,
+			endedAt,
+			durationMs,
 			capabilityCalls: this.extractCapabilityCalls(events),
 			modelInteractions: this.extractModelInteractions(events),
+			progressEvents: [...state.progressEvents],
 		};
 	}
 
@@ -1186,10 +1225,121 @@ export default function (pi) {
 				pending.resolve(data);
 				return;
 			}
-			state.events.push(data as RpcEvent);
+			const event = data as RpcEvent;
+			state.events.push(event);
+			this.emitRpcProgress(state, event);
 		} catch {
 			state.stderr += `${line}\n`;
 		}
+	}
+
+	private emitRpcProgress(state: RpcProcessSession, event: RpcEvent): void {
+		if (!state.progressHandler) {
+			return;
+		}
+
+		if (event.type === "agent_start") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: "智能体开始工作",
+				status: "running",
+			});
+			return;
+		}
+		if (event.type === "model_request") {
+			const modelName = [event.model?.provider, event.model?.modelId].filter(Boolean).join("/");
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: "准备模型请求",
+				detail: modelName || "正在整理消息、工具和系统提示词。",
+				status: "running",
+			});
+			return;
+		}
+		if (event.type === "model_response") {
+			const errorMessage = event.errorMessage ?? this.getAssistantMessageError(event.message);
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: errorMessage ? "模型响应失败" : "收到模型响应",
+				detail: errorMessage ?? this.summarizeAssistantMessage(event.message),
+				status: errorMessage ? "failure" : "success",
+			});
+			return;
+		}
+		if (event.type === "tool_execution_start") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: `调用工具：${event.toolName ?? "unknown-tool"}`,
+				detail: this.summarizeUnknown(event.args ?? event.input),
+				status: "running",
+			});
+			return;
+		}
+		if (event.type === "tool_execution_update") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: `工具进展：${event.toolName ?? "unknown-tool"}`,
+				detail: this.summarizeUnknown(event.partialResult, 240),
+				status: "running",
+			});
+			return;
+		}
+		if (event.type === "tool_execution_end") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: `工具完成：${event.toolName ?? "unknown-tool"}`,
+				detail: this.summarizeUnknown(event.result, 240),
+				status: event.isError ? "failure" : "success",
+			});
+			return;
+		}
+		if (event.type === "message_start" && event.message?.role === "assistant") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: "开始生成回复",
+				status: "running",
+			});
+			return;
+		}
+		if (event.type === "turn_end") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: "完成一轮推理",
+				detail: event.toolResults?.length ? `返回 ${event.toolResults.length} 个工具结果。` : undefined,
+				status: "success",
+			});
+			return;
+		}
+		if (event.type === "agent_end") {
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				title: "智能体执行结束",
+				status: "success",
+			});
+		}
+	}
+
+	private emitProgress(
+		state: RpcProcessSession,
+		event: Omit<AgentProgressEvent, "id" | "timestamp"> & { timestamp?: string },
+	): void {
+		const progressEvent: AgentProgressEvent = {
+			id: crypto.randomUUID(),
+			timestamp: event.timestamp ?? new Date().toISOString(),
+			...event,
+		};
+		state.progressEvents.push(progressEvent);
+		state.progressHandler?.(progressEvent);
+	}
+
+	private formatDuration(ms: number): string {
+		const totalSeconds = Math.max(0, Math.round(ms / 1000));
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		if (minutes === 0) {
+			return `${seconds} 秒`;
+		}
+		return `${minutes} 分 ${seconds.toString().padStart(2, "0")} 秒`;
 	}
 
 	private isRpcResponse(data: RpcResponse | RpcEvent): data is RpcResponse {

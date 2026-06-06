@@ -33,6 +33,7 @@ import type {
   AgentKnowledgeItem,
   AgentModelContextPreview,
   AgentModelInteractionLog,
+  AgentProgressEvent,
   ConversationStoreState,
   AgentRuleConfig,
   AgentSession,
@@ -64,6 +65,11 @@ interface TranscriptItem {
   text: string;
   createdAt: string;
   attachments?: ConversationAttachmentMeta[];
+  progressEvents?: AgentProgressEvent[];
+  processingStartedAt?: string;
+  processingEndedAt?: string;
+  processingDurationMs?: number;
+  processingStatus?: AgentProgressEvent['status'];
 }
 
 interface LocalNotice {
@@ -835,6 +841,35 @@ function formatLocalTimestamp(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
 }
 
+function formatDurationMs(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function getProcessingDurationMs(item: TranscriptItem, now: number): number | null {
+  if (typeof item.processingDurationMs === 'number') {
+    return item.processingDurationMs;
+  }
+  if (!item.processingStartedAt) {
+    return null;
+  }
+  const startedAt = new Date(item.processingStartedAt).getTime();
+  if (Number.isNaN(startedAt)) {
+    return null;
+  }
+  const endedAt = item.processingEndedAt ? new Date(item.processingEndedAt).getTime() : now;
+  return Number.isNaN(endedAt) ? null : Math.max(0, endedAt - startedAt);
+}
+
 function getAuditStartTime(entry: AuditLogEntry): string {
   return entry.operationStartedAt ?? entry.timestamp;
 }
@@ -1278,6 +1313,63 @@ function AttachmentList({ attachments }: { attachments?: ConversationAttachmentM
   );
 }
 
+function AgentProgressSummary({
+  item,
+  expanded,
+  now,
+  onToggle,
+}: {
+  item: TranscriptItem;
+  expanded: boolean;
+  now: number;
+  onToggle: () => void;
+}): ReactElement | null {
+  const events = item.progressEvents ?? [];
+  if (events.length === 0 && !item.processingStartedAt) {
+    return null;
+  }
+
+  const latestEvent = events.at(-1);
+  const durationMs = getProcessingDurationMs(item, now);
+  const isRunning = item.processingStatus === 'running' || (!item.processingEndedAt && item.processingStartedAt);
+  const statusText = item.processingStatus === 'failure' ? '处理失败' : isRunning ? '处理中' : '处理完成';
+
+  return (
+    <div className="agent-progress-box">
+      <div className="agent-progress-summary">
+        <div>
+          <strong>{statusText}</strong>
+          <span>{latestEvent?.title ?? '正在准备执行过程'}</span>
+        </div>
+        <div className="agent-progress-metrics">
+          {item.processingEndedAt && <span>结束 {formatLocalTimestamp(item.processingEndedAt)}</span>}
+          {durationMs !== null && <span>耗时 {formatDurationMs(durationMs)}</span>}
+          <button type="button" className="text-button agent-progress-toggle" onClick={onToggle}>
+            {expanded ? '收起过程' : '查看过程'}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <ol className="agent-progress-timeline">
+          {events.map((event) => (
+            <li className={`agent-progress-step ${event.status}`} key={event.id}>
+              <span className="agent-progress-dot" />
+              <div>
+                <div className="agent-progress-step-head">
+                  <strong>{event.title}</strong>
+                  <time dateTime={event.timestamp}>{formatLocalTimestamp(event.timestamp)}</time>
+                </div>
+                {event.detail && <p>{event.detail}</p>}
+                {typeof event.durationMs === 'number' && <small>耗时 {formatDurationMs(event.durationMs)}</small>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function createDefaultAuditQuery(): AuditLogQuery {
   const end = new Date();
   const start = new Date(end);
@@ -1408,6 +1500,11 @@ function App(): ReactElement {
   const activeConversationIdsRef = useRef<Record<string, string>>({});
   const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const activeProgressTargetsRef = useRef<
+    Record<string, { agentId: string; conversationId: string; messageCreatedAt: string }>
+  >({});
+  const [expandedProgressMessageIds, setExpandedProgressMessageIds] = useState<Set<string>>(() => new Set());
+  const [progressNow, setProgressNow] = useState(() => Date.now());
   const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities' | 'archived'>(
     'models',
   );
@@ -1454,6 +1551,18 @@ function App(): ReactElement {
 
   useEffect(() => {
     void refreshInitialState();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.windowsClient.onAgentProgress((progressEvent) => {
+      appendProgressEvent(progressEvent);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -1797,6 +1906,42 @@ function App(): ReactElement {
     };
     persistConversationStore();
     setConversationRevision((revision) => revision + 1);
+  }
+
+  function appendProgressEvent(progressEvent: AgentProgressEvent): void {
+    const target = activeProgressTargetsRef.current[progressEvent.sessionId];
+    if (!target) {
+      return;
+    }
+    const conversation = agentConversationsRef.current[target.agentId]?.find(
+      (item) => item.id === target.conversationId,
+    );
+    if (!conversation) {
+      return;
+    }
+    const nextTranscript = conversation.transcript.map((item) => {
+      if (item.role !== 'assistant' || item.createdAt !== target.messageCreatedAt) {
+        return item;
+      }
+      const existingEvents = item.progressEvents ?? [];
+      const nextEvents = existingEvents.some((event) => event.id === progressEvent.id)
+        ? existingEvents
+        : [...existingEvents, progressEvent];
+      return {
+        ...item,
+        progressEvents: nextEvents,
+        processingStatus: progressEvent.status,
+        processingEndedAt:
+          progressEvent.status === 'success' || progressEvent.status === 'failure'
+            ? progressEvent.timestamp
+            : item.processingEndedAt,
+        processingDurationMs: progressEvent.durationMs ?? item.processingDurationMs,
+      };
+    });
+    commitAgentConversation(target.agentId, {
+      ...conversation,
+      transcript: nextTranscript,
+    });
   }
 
   function persistConversationStore(): void {
@@ -3149,6 +3294,20 @@ function App(): ReactElement {
       attachments: transcriptAttachments,
     };
     const userTranscript = [...transcript, userItem];
+    const assistantStartedAt = new Date().toISOString();
+    const assistantItem: TranscriptItem = {
+      role: 'assistant',
+      text: '',
+      createdAt: assistantStartedAt,
+      progressEvents: [],
+      processingStartedAt: assistantStartedAt,
+      processingStatus: 'running',
+    };
+    activeProgressTargetsRef.current[messageSession.id] = {
+      agentId: messageAgent.id,
+      conversationId: messageConversation.id,
+      messageCreatedAt: assistantStartedAt,
+    };
     const nextTitle =
       transcript.length === 0 && isDefaultConversationTitle(messageConversation.title, messageAgent)
         ? createConversationTitleFromMessage(message)
@@ -3157,41 +3316,86 @@ function App(): ReactElement {
       ...messageConversation,
       draftMessage: '',
       title: nextTitle,
-      transcript: userTranscript,
+      transcript: [...userTranscript, assistantItem],
     });
     clearCurrentConversationAttachments(messageConversation.id);
     setStatusText('正在通过适配器发送消息');
 
-    const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage);
-    const assistantTranscript = [
-      ...userTranscript,
-      { role: 'assistant' as const, text: result.responseText, createdAt: result.createdAt },
-    ];
-    const currentSession = await window.windowsClient.getAgentSessionState(messageSession.id);
-    const runtimePreview = currentSession?.contextPreview;
-    const contextPreview = runtimePreview?.systemPrompt.trim()
-      ? runtimePreview
-      : extractContextPreviewFromModelInteractions(result.modelInteractions);
-    const nextSession = currentSession
-      ? {
-          ...currentSession,
-          agentId: messageSession.agentId,
-          agentName: messageSession.agentName,
-          modelId: messageSession.modelId,
-          contextPreview,
-        }
-      : contextPreview
-        ? { ...messageSession, contextPreview }
-        : currentSession;
-    commitAgentConversation(messageAgent.id, {
-      ...messageConversation,
-      session: nextSession,
-      title: nextTitle,
-      transcript: assistantTranscript,
-      draftMessage: '',
-    });
-    setStatusText('已收到适配器响应');
-    await refreshAuditLogs();
+    try {
+      const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage);
+      const progressEvents = result.progressEvents ?? assistantItem.progressEvents ?? [];
+      const processingEndedAt = result.endedAt ?? result.createdAt;
+      const processingDurationMs =
+        typeof result.durationMs === 'number'
+          ? result.durationMs
+          : new Date(processingEndedAt).getTime() - new Date(assistantStartedAt).getTime();
+      const assistantTranscript = [
+        ...userTranscript,
+        {
+          role: 'assistant' as const,
+          text: result.responseText,
+          createdAt: assistantStartedAt,
+          progressEvents,
+          processingStartedAt: result.startedAt ?? assistantStartedAt,
+          processingEndedAt,
+          processingDurationMs,
+          processingStatus: 'success' as const,
+        },
+      ];
+      const currentSession = await window.windowsClient.getAgentSessionState(messageSession.id);
+      const runtimePreview = currentSession?.contextPreview;
+      const contextPreview = runtimePreview?.systemPrompt.trim()
+        ? runtimePreview
+        : extractContextPreviewFromModelInteractions(result.modelInteractions);
+      const nextSession = currentSession
+        ? {
+            ...currentSession,
+            agentId: messageSession.agentId,
+            agentName: messageSession.agentName,
+            modelId: messageSession.modelId,
+            contextPreview,
+          }
+        : contextPreview
+          ? { ...messageSession, contextPreview }
+          : currentSession;
+      commitAgentConversation(messageAgent.id, {
+        ...messageConversation,
+        session: nextSession,
+        title: nextTitle,
+        transcript: assistantTranscript,
+        draftMessage: '',
+      });
+      setStatusText('已收到适配器响应');
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const failedConversation = agentConversationsRef.current[messageAgent.id]?.find(
+        (item) => item.id === messageConversation.id,
+      );
+      const failedProgressEvents =
+        failedConversation?.transcript.find((item) => item.createdAt === assistantStartedAt)?.progressEvents ?? [];
+      commitAgentConversation(messageAgent.id, {
+        ...(failedConversation ?? messageConversation),
+        title: nextTitle,
+        transcript: [
+          ...userTranscript,
+          {
+            ...assistantItem,
+            text: `处理失败：${errorMessage}`,
+            progressEvents: failedProgressEvents,
+            processingEndedAt: failedAt,
+            processingDurationMs: new Date(failedAt).getTime() - new Date(assistantStartedAt).getTime(),
+            processingStatus: 'failure',
+          },
+        ],
+        draftMessage: '',
+      });
+      setAgentNotice({ tone: 'error', text: errorMessage });
+      setStatusText('智能体处理失败');
+    } finally {
+      delete activeProgressTargetsRef.current[messageSession.id];
+      await refreshAuditLogs();
+    }
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -3727,6 +3931,8 @@ function App(): ReactElement {
                         searchNavigationTarget?.conversationId === selectedConversation.id &&
                         targetMessageIndex === messageIndex;
                       const anchorId = getMessageAnchorId(selectedConversation.id, messageIndex);
+                      const progressMessageId = `${selectedConversation.id}:${item.createdAt}:progress`;
+                      const progressExpanded = expandedProgressMessageIds.has(progressMessageId);
 
                       return (
                         <div
@@ -3740,7 +3946,29 @@ function App(): ReactElement {
                             <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
                             <time dateTime={item.createdAt}>{formatLocalTimestamp(item.createdAt)}</time>
                           </div>
-                          <MarkdownMessage text={item.text} searchQuery={isSearchTarget ? targetQuery : undefined} />
+                          {item.text ? (
+                            <MarkdownMessage text={item.text} searchQuery={isSearchTarget ? targetQuery : undefined} />
+                          ) : (
+                            <p className="assistant-pending-text">正在处理，请稍候。</p>
+                          )}
+                          {item.role === 'assistant' && (
+                            <AgentProgressSummary
+                              item={item}
+                              expanded={progressExpanded}
+                              now={progressNow}
+                              onToggle={() =>
+                                setExpandedProgressMessageIds((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(progressMessageId)) {
+                                    next.delete(progressMessageId);
+                                  } else {
+                                    next.add(progressMessageId);
+                                  }
+                                  return next;
+                                })
+                              }
+                            />
+                          )}
                           <AttachmentList attachments={item.attachments} />
                         </div>
                       );

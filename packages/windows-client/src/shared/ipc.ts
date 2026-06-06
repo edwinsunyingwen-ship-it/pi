@@ -25,5 +25,6 @@ export const IPC_CHANNELS = {
 	agentStopSession: "agent:stop-session",
 	agentGetSessionState: "agent:get-session-state",
 	agentSendUserMessage: "agent:send-user-message",
+	agentProgress: "agent:progress",
 	agentListAvailableTools: "agent:list-available-tools",
 } as const;

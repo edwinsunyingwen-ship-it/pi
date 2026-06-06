@@ -69,8 +69,24 @@ export interface AgentMessageResult {
 	sessionId: string;
 	responseText: string;
 	createdAt: string;
+	startedAt?: string;
+	endedAt?: string;
+	durationMs?: number;
 	capabilityCalls?: AgentCapabilityCallLog[];
 	modelInteractions?: AgentModelInteractionLog[];
+	progressEvents?: AgentProgressEvent[];
+}
+
+export type AgentProgressEventStatus = "running" | "success" | "failure" | "info";
+
+export interface AgentProgressEvent {
+	id: string;
+	sessionId: string;
+	timestamp: string;
+	title: string;
+	detail?: string;
+	status: AgentProgressEventStatus;
+	durationMs?: number;
 }
 
 export interface AgentImageContent {
@@ -96,6 +112,11 @@ export interface ConversationTranscriptItem {
 	text: string;
 	createdAt: string;
 	attachments?: ConversationAttachmentMeta[];
+	progressEvents?: AgentProgressEvent[];
+	processingStartedAt?: string;
+	processingEndedAt?: string;
+	processingDurationMs?: number;
+	processingStatus?: AgentProgressEventStatus;
 }
 
 export interface StoredAgentConversation {
@@ -444,5 +465,6 @@ export interface WindowsClientApi {
 		message: string,
 		images?: AgentImageContent[],
 	) => Promise<AgentMessageResult>;
+	onAgentProgress: (handler: (event: AgentProgressEvent) => void) => () => void;
 	listAvailableTools: () => Promise<AgentToolInfo[]>;
 }

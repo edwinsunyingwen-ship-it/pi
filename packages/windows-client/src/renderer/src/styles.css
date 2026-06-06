@@ -1228,6 +1228,107 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.assistant-pending-text {
+  color: #667085;
+  margin: 0;
+}
+
+.agent-progress-box {
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px;
+}
+
+.agent-progress-summary {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.agent-progress-summary > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-progress-summary strong {
+  color: #172033;
+}
+
+.agent-progress-summary span {
+  color: #667085;
+  font-size: 0.82rem;
+}
+
+.agent-progress-metrics {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.agent-progress-toggle {
+  min-height: 28px;
+}
+
+.agent-progress-timeline {
+  border-top: 1px solid #e4e7ec;
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 0;
+}
+
+.agent-progress-step {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  padding: 6px 0;
+}
+
+.agent-progress-dot {
+  background: #98a2b3;
+  border-radius: 999px;
+  height: 8px;
+  margin-top: 6px;
+  width: 8px;
+}
+
+.agent-progress-step.success .agent-progress-dot {
+  background: #2f8a57;
+}
+
+.agent-progress-step.failure .agent-progress-dot {
+  background: #b94a48;
+}
+
+.agent-progress-step-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.agent-progress-step-head time,
+.agent-progress-step small {
+  color: #667085;
+  font-size: 0.76rem;
+}
+
+.agent-progress-step p {
+  color: #475467;
+  font-size: 0.84rem;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .markdown-message > :first-child {
   margin-top: 0;
 }

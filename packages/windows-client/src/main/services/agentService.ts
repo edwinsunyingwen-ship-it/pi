@@ -4,6 +4,7 @@ import type {
 	AgentImageContent,
 	AgentMessageResult,
 	AgentModelInteractionLog,
+	AgentProgressEvent,
 	AgentSession,
 	AgentToolInfo,
 	AuditStatus,
@@ -89,6 +90,7 @@ export class AgentService {
 		sessionId: string,
 		message: string,
 		images?: AgentImageContent[],
+		onProgress?: (event: AgentProgressEvent) => void,
 	): Promise<AgentMessageResult> {
 		await this.writeAudit({
 			sessionId,
@@ -99,7 +101,7 @@ export class AgentService {
 		});
 
 		try {
-			const result = await this.adapter.sendUserMessage(sessionId, message, images);
+			const result = await this.adapter.sendUserMessage(sessionId, message, images, onProgress);
 			await this.writeModelInteractionAudits(sessionId, result.modelInteractions ?? []);
 			await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
 			await this.writeAudit({

@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent 工作过程展示原型</title>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #fffdfa;
+      --surface-soft: #f5f7fa;
+      --panel: #fbfaf7;
+      --border: #e4e7ec;
+      --border-strong: #d0d5dd;
+      --text: #172033;
+      --muted: #667085;
+      --faint: #98a2b3;
+      --primary: #1f5a4f;
+      --primary-soft: #e8f1ee;
+      --blue: #294a66;
+      --blue-soft: #eef4fa;
+      --amber: #8a5a18;
+      --amber-soft: #fff7e8;
+      --danger: #9a3412;
+      --danger-soft: #fff7ed;
+      --shadow: 0 12px 34px rgb(15 23 42 / 7%);
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", Inter, ui-sans-serif, system-ui, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    button {
+      align-items: center;
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      font: inherit;
+      font-weight: 800;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid #e5ded5;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+      padding: 12px 10px;
+    }
+
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      min-height: 38px;
+    }
+
+    .brand-mark {
+      align-items: center;
+      background: #101828;
+      border-radius: 6px;
+      color: #fff;
+      display: inline-flex;
+      font-size: 13px;
+      font-weight: 900;
+      height: 28px;
+      justify-content: center;
+      width: 28px;
+    }
+
+    .brand strong {
+      font-size: 17px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav button {
+      background: transparent;
+      color: #4f4a43;
+      justify-content: flex-start;
+      min-height: 34px;
+      padding: 7px 8px;
+      text-align: left;
+    }
+
+    .nav button.active,
+    .nav button:hover {
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .section-label {
+      color: #9a9389;
+      font-size: 12px;
+      font-weight: 800;
+      margin-top: 6px;
+      padding: 4px 8px;
+    }
+
+    .thread {
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      display: grid;
+      gap: 3px;
+      min-height: 52px;
+      padding: 9px 8px;
+    }
+
+    .thread.active {
+      background: #fffdfa;
+      border-color: #c8dbd1;
+    }
+
+    .thread strong,
+    .thread small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .thread small {
+      color: var(--muted);
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      overflow: hidden;
+      padding: 8px 18px 16px;
+    }
+
+    .topbar {
+      align-items: center;
+      border-bottom: 1px solid #eef1f5;
+      display: flex;
+      justify-content: space-between;
+      min-height: 52px;
+      padding-bottom: 8px;
+    }
+
+    .title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .title small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .title strong {
+      font-size: 15px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .runtime {
+      align-items: center;
+      background: var(--blue-soft);
+      border: 1px solid #c9dceb;
+      border-radius: 999px;
+      color: var(--blue);
+      display: inline-flex;
+      font-size: 13px;
+      font-weight: 800;
+      gap: 8px;
+      min-height: 30px;
+      padding: 0 10px;
+    }
+
+    .dot {
+      animation: pulse 1.2s infinite ease-in-out;
+      background: #2f80ed;
+      border-radius: 999px;
+      display: inline-block;
+      height: 8px;
+      width: 8px;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.92); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+
+    .workspace {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      min-height: 0;
+      padding-top: 14px;
+    }
+
+    .chat {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .conversation {
+      align-content: start;
+      display: grid;
+      flex: 1 1 auto;
+      gap: 18px;
+      overflow: auto;
+      padding: 10px 8px 18px;
+    }
+
+    .message {
+      border-radius: 14px;
+      display: grid;
+      gap: 9px;
+      line-height: 1.55;
+      max-width: min(1120px, 86%);
+      padding: 13px 16px;
+    }
+
+    .message.user {
+      background: #e8f1ff;
+      border: 1px solid #cfddf5;
+      color: #14315f;
+      justify-self: end;
+    }
+
+    .message.assistant {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      max-width: min(1440px, 96%);
+    }
+
+    .meta {
+      border-bottom: 1px solid rgb(148 163 184 / 20%);
+      color: var(--muted);
+      display: flex;
+      font-size: 12px;
+      font-weight: 800;
+      gap: 8px;
+      justify-content: space-between;
+      padding-bottom: 5px;
+    }
+
+    .progress-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 0;
+      max-width: min(1440px, 96%);
+      overflow: hidden;
+    }
+
+    .progress-head {
+      align-items: center;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      min-height: 62px;
+      padding: 12px 14px;
+    }
+
+    .spinner {
+      animation: spin 0.9s linear infinite;
+      border: 2px solid #d0d5dd;
+      border-top-color: var(--primary);
+      border-radius: 999px;
+      height: 18px;
+      width: 18px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .progress-title strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .progress-title span {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .toggle {
+      background: #f3f6fb;
+      border: 1px solid var(--border);
+      color: #344054;
+    }
+
+    .toggle:hover {
+      background: #eaf0f7;
+    }
+
+    .meter {
+      background: #edf1f5;
+      height: 3px;
+      overflow: hidden;
+    }
+
+    .meter span {
+      animation: meter 3.8s ease-in-out infinite;
+      background: var(--primary);
+      display: block;
+      height: 100%;
+      width: 42%;
+    }
+
+    @keyframes meter {
+      0% { transform: translateX(-80%); }
+      55% { transform: translateX(115%); }
+      100% { transform: translateX(210%); }
+    }
+
+    .progress-body {
+      border-top: 1px solid #eef1f5;
+      display: none;
+      grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .progress-card.open .progress-body {
+      display: grid;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .step {
+      align-items: start;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 24px minmax(0, 1fr);
+    }
+
+    .step-icon {
+      align-items: center;
+      border-radius: 999px;
+      display: inline-flex;
+      font-size: 12px;
+      font-weight: 900;
+      height: 24px;
+      justify-content: center;
+      width: 24px;
+    }
+
+    .step.done .step-icon {
+      background: #eef8f2;
+      color: #1f6f45;
+    }
+
+    .step.running .step-icon {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .step.retry .step-icon {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .step.pending .step-icon {
+      background: #f2f4f7;
+      color: var(--muted);
+    }
+
+    .step-main {
+      border-bottom: 1px solid #eef1f5;
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      padding-bottom: 10px;
+    }
+
+    .step-main strong {
+      font-size: 14px;
+    }
+
+    .step-main span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .event-log {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+    }
+
+    .event-log strong {
+      font-size: 13px;
+    }
+
+    .log-line {
+      background: #fff;
+      border: 1px solid #e8edf2;
+      border-radius: 8px;
+      color: #344054;
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+      padding: 8px 9px;
+    }
+
+    .composer {
+      background: #fff;
+      border: 1px solid #d9dee7;
+      border-radius: 24px;
+      box-shadow: 0 10px 28px rgb(15 23 42 / 8%);
+      display: grid;
+      flex: 0 0 auto;
+      gap: 8px;
+      padding: 10px 12px;
+    }
+
+    .composer p {
+      color: var(--muted);
+      margin: 0;
+      min-height: 44px;
+      padding: 8px 6px 2px;
+    }
+
+    .composer-actions {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .toolset {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tool-button {
+      background: transparent;
+      border-radius: 999px;
+      color: #475467;
+      min-height: 32px;
+      padding: 0 9px;
+    }
+
+    .send {
+      background: #101828;
+      border-radius: 999px;
+      color: #fff;
+      min-width: 86px;
+      justify-content: center;
+    }
+
+    .side-panel {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .side-head {
+      border-bottom: 1px solid #eef1f5;
+      display: grid;
+      gap: 4px;
+      padding: 14px;
+    }
+
+    .side-head strong {
+      font-size: 15px;
+    }
+
+    .side-head span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .side-body {
+      align-content: start;
+      display: grid;
+      gap: 12px;
+      overflow: auto;
+      padding: 14px;
+    }
+
+    .summary-box {
+      background: #f8fafc;
+      border: 1px solid #e8edf2;
+      border-radius: 8px;
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .summary-box small {
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .kv {
+      display: grid;
+      gap: 7px;
+    }
+
+    .kv div {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 76px minmax(0, 1fr);
+    }
+
+    .kv dt {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      margin: 0;
+    }
+
+    .kv dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .policy-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .policy {
+      align-items: start;
+      border: 1px solid #e8edf2;
+      border-radius: 8px;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 18px minmax(0, 1fr);
+      padding: 10px;
+    }
+
+    .policy i {
+      background: var(--primary);
+      border-radius: 999px;
+      height: 7px;
+      margin-top: 7px;
+      width: 7px;
+    }
+
+    .policy strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .policy span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 900px) {
+      body {
+        overflow: auto;
+      }
+
+      .app {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .main {
+        min-height: 100vh;
+      }
+
+      .workspace,
+      .progress-body {
+        grid-template-columns: 1fr;
+      }
+
+      .side-panel {
+        min-height: 420px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">Pi</span>
+        <strong>Pi Agent</strong>
+      </div>
+      <nav class="nav">
+        <button class="active">工作台</button>
+        <button>搜索</button>
+        <button>工作区</button>
+        <button>配置</button>
+      </nav>
+      <div class="section-label">最近会话</div>
+      <div class="thread active">
+        <strong>展示智能体工作过程</strong>
+        <small>正在运行，2 分 14 秒</small>
+      </div>
+      <div class="thread">
+        <strong>修复 Windows 打包</strong>
+        <small>昨天</small>
+      </div>
+      <div class="thread">
+        <strong>Provider 接入讨论</strong>
+        <small>周三</small>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="title">
+          <small>主智能体</small>
+          <strong>展示智能体工作过程</strong>
+        </div>
+        <div class="runtime"><span class="dot"></span><span>正在处理用户请求</span></div>
+      </header>
+
+      <section class="workspace">
+        <div class="chat">
+          <div class="conversation">
+            <article class="message user">
+              <div class="meta">
+                <span>用户</span>
+                <span>21:18</span>
+              </div>
+              <div>用户提出问题后，要等很久才看到最终结果。是不是应该把智能体背后的工作过程也展示出来？先用 HTML 呈现一下设计效果。</div>
+            </article>
+
+            <section class="progress-card open" id="progressCard">
+              <div class="progress-head">
+                <span class="spinner"></span>
+                <div class="progress-title">
+                  <strong>智能体正在设计交互原型</strong>
+                  <span>已完成项目结构检查和样式对齐，正在整理可展开的过程视图。</span>
+                </div>
+                <button class="toggle" id="toggleButton" type="button">收起过程</button>
+              </div>
+              <div class="meter"><span></span></div>
+              <div class="progress-body">
+                <div class="timeline">
+                  <div class="step done">
+                    <span class="step-icon">✓</span>
+                    <div class="step-main">
+                      <strong>理解意图</strong>
+                      <span>把“等待很久”拆成两个需求：实时反馈进度，以及最终结果仍然干净集中。</span>
+                    </div>
+                  </div>
+                  <div class="step done">
+                    <span class="step-icon">✓</span>
+                    <div class="step-main">
+                      <strong>检查项目上下文</strong>
+                      <span>读取桌面端现有布局和颜色体系，避免做成独立营销页。</span>
+                    </div>
+                  </div>
+                  <div class="step retry">
+                    <span class="step-icon">!</span>
+                    <div class="step-main">
+                      <strong>尝试筛选前端文件</strong>
+                      <span>第一次文件匹配没有命中，改用包目录枚举后找到 renderer 入口和样式文件。</span>
+                    </div>
+                  </div>
+                  <div class="step running">
+                    <span class="step-icon">…</span>
+                    <div class="step-main">
+                      <strong>生成原型</strong>
+                      <span>把工作过程放在对话流中的折叠块里，同时在右侧保留任务级摘要。</span>
+                    </div>
+                  </div>
+                  <div class="step pending">
+                    <span class="step-icon">4</span>
+                    <div class="step-main">
+                      <strong>输出最终结论</strong>
+                      <span>最终答案出现时，过程块自动变为“已完成”，用户仍可回看细节。</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="event-log">
+                  <strong>详细事件</strong>
+                  <div class="log-line">21:18:07 started: inspect workspace</div>
+                  <div class="log-line">21:18:14 read: packages/windows-client/src/renderer/src/styles.css</div>
+                  <div class="log-line">21:18:31 retry: file filter returned no matches, switched to package listing</div>
+                  <div class="log-line">21:19:04 drafting: progress disclosure pattern</div>
+                </div>
+              </div>
+            </section>
+
+            <article class="message assistant">
+              <div class="meta">
+                <span>智能体最终结果预览</span>
+                <span>完成后展示</span>
+              </div>
+              <div>
+                建议展示中间过程，但默认只显示高信号摘要。主对话里放一个可折叠的“工作过程”块，实时更新当前动作、耗时、已完成步骤和遇到的重试；最终答案仍然作为普通 assistant 消息出现。这样用户能知道系统没有卡住，也不会被工具日志淹没。
+              </div>
+            </article>
+          </div>
+
+          <footer class="composer">
+            <p>继续输入问题，或在智能体运行时点“停止”。</p>
+            <div class="composer-actions">
+              <div class="toolset">
+                <button class="tool-button">附件</button>
+                <button class="tool-button">模板</button>
+                <button class="tool-button">上下文</button>
+              </div>
+              <button class="send">发送</button>
+            </div>
+          </footer>
+        </div>
+
+        <aside class="side-panel">
+          <div class="side-head">
+            <strong>过程展示设计</strong>
+            <span>右侧用于任务级概览，不替代主对话里的实时状态。</span>
+          </div>
+          <div class="side-body">
+            <section class="summary-box">
+              <small>当前任务</small>
+              <dl class="kv">
+                <div>
+                  <dt>状态</dt>
+                  <dd>运行中</dd>
+                </div>
+                <div>
+                  <dt>耗时</dt>
+                  <dd>2 分 14 秒</dd>
+                </div>
+                <div>
+                  <dt>阶段</dt>
+                  <dd>生成 HTML 原型</dd>
+                </div>
+                <div>
+                  <dt>风险</dt>
+                  <dd>未修改产品代码</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="summary-box">
+              <small>展示原则</small>
+              <div class="policy-list">
+                <div class="policy">
+                  <i></i>
+                  <div>
+                    <strong>默认展示摘要</strong>
+                    <span>用户看到当前动作和进度，不需要先理解工具调用。</span>
+                  </div>
+                </div>
+                <div class="policy">
+                  <i></i>
+                  <div>
+                    <strong>细节按需展开</strong>
+                    <span>搜索、读取、失败重试、验证结果可以查看，但不持续占据屏幕。</span>
+                  </div>
+                </div>
+                <div class="policy">
+                  <i></i>
+                  <div>
+                    <strong>最终答案独立呈现</strong>
+                    <span>过程记录可以保留，最终结果仍然是清晰的 assistant 回复。</span>
+                  </div>
+                </div>
+                <div class="policy">
+                  <i></i>
+                  <div>
+                    <strong>只展示可解释信息</strong>
+                    <span>不要泄露系统提示、密钥、冗长原始日志或无意义内部状态。</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="summary-box">
+              <small>建议状态模型</small>
+              <dl class="kv">
+                <div>
+                  <dt>排队</dt>
+                  <dd>请求已收到</dd>
+                </div>
+                <div>
+                  <dt>工作中</dt>
+                  <dd>正在读文件、分析、编辑或验证</dd>
+                </div>
+                <div>
+                  <dt>需确认</dt>
+                  <dd>等待权限或关键决策</dd>
+                </div>
+                <div>
+                  <dt>完成</dt>
+                  <dd>展示最终答案，过程可回看</dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const progressCard = document.getElementById("progressCard");
+    const toggleButton = document.getElementById("toggleButton");
+
+    toggleButton.addEventListener("click", () => {
+      const isOpen = progressCard.classList.toggle("open");
+      toggleButton.textContent = isOpen ? "收起过程" : "查看过程";
+    });
+  </script>
+</body>
+</html>

@@ -191,8 +191,10 @@ function registerIpcHandlers(): void {
 	);
 	ipcMain.handle(
 		IPC_CHANNELS.agentSendUserMessage,
-		(_event, sessionId: string, message: string, images?: AgentImageContent[]) =>
-			agentService.sendUserMessage(sessionId, message, images),
+		(event, sessionId: string, message: string, images?: AgentImageContent[]) =>
+			agentService.sendUserMessage(sessionId, message, images, (progressEvent) => {
+				event.sender.send(IPC_CHANNELS.agentProgress, progressEvent);
+			}),
 	);
 	ipcMain.handle(IPC_CHANNELS.agentListAvailableTools, () => agentService.listAvailableTools());
 }

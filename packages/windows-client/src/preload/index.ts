@@ -33,6 +33,13 @@ const api: WindowsClientApi = {
 	getFilePath: (file) => webUtils.getPathForFile(file),
 	sendAgentUserMessage: (sessionId, message, images) =>
 		ipcRenderer.invoke(IPC_CHANNELS.agentSendUserMessage, sessionId, message, images),
+	onAgentProgress: (handler) => {
+		const listener = (_event: Electron.IpcRendererEvent, progressEvent: Parameters<typeof handler>[0]) => {
+			handler(progressEvent);
+		};
+		ipcRenderer.on(IPC_CHANNELS.agentProgress, listener);
+		return () => ipcRenderer.off(IPC_CHANNELS.agentProgress, listener);
+	},
 	listAvailableTools: () => ipcRenderer.invoke(IPC_CHANNELS.agentListAvailableTools),
 };
 
