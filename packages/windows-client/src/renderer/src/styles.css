@@ -1294,12 +1294,16 @@ dd {
   overflow-wrap: anywhere;
   padding: 0;
   text-align: left;
-  text-decoration: underline;
+  text-decoration: none;
   text-underline-offset: 2px;
 }
 
-.local-path-link:hover {
-  color: #164e43;
+.local-path-link:hover,
+.local-path-link:focus-visible {
+  background: transparent;
+  color: #174c72;
+  outline: 0;
+  text-decoration: underline;
 }
 
 .markdown-message code {

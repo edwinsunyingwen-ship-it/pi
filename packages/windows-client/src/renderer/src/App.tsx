@@ -972,7 +972,7 @@ function isLocalPathBoundary(text: string, index: number): boolean {
     return true;
   }
   const previousChar = text[index - 1];
-  return previousChar === undefined || /\s|[(\[{`"']/.test(previousChar);
+  return previousChar === undefined || /[\s:([{\[`"'\u3001\u3002\uff0c\uff1a\uff1b\uff01]/u.test(previousChar);
 }
 
 function findLocalPathEnd(text: string, startIndex: number): number {
