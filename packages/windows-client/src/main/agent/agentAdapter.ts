@@ -89,6 +89,11 @@ type RpcSessionStateData = {
 
 type JsonRecord = Record<string, unknown>;
 
+interface ToolResultCapabilityMeta {
+	capabilityId?: string;
+	capabilityName?: string;
+}
+
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
 	sendUserMessage(
@@ -1506,6 +1511,9 @@ export default function (pi) {
 				call.status = event.isError ? "failure" : "success";
 				call.outputSummary = this.summarizeUnknown(event.result);
 				call.fullOutput = this.redactSensitive(this.stringifyUnknown(event.result));
+				const capabilityMeta = this.extractToolResultCapabilityMeta(event.result);
+				call.capabilityId = call.capabilityId ?? capabilityMeta.capabilityId;
+				call.capabilityName = call.capabilityName ?? capabilityMeta.capabilityName;
 				continue;
 			}
 
@@ -1637,6 +1645,9 @@ export default function (pi) {
 				call.outputSummary = call.outputSummary ?? this.summarizeUnknown(message.content);
 				call.fullOutput = call.fullOutput ?? this.redactSensitive(this.stringifyUnknown(message.content));
 				call.status = "success";
+				const capabilityMeta = this.extractToolResultCapabilityMeta(message.content);
+				call.capabilityId = call.capabilityId ?? capabilityMeta.capabilityId;
+				call.capabilityName = call.capabilityName ?? capabilityMeta.capabilityName;
 			}
 
 			if (message.role === "assistant" && this.isRecord(message.content)) {
@@ -1655,6 +1666,20 @@ export default function (pi) {
 				}
 			}
 		}
+	}
+
+	private extractToolResultCapabilityMeta(value: unknown): ToolResultCapabilityMeta {
+		if (!this.isRecord(value)) {
+			return {};
+		}
+		const details = this.isRecord(value.details) ? value.details : undefined;
+		if (!details) {
+			return {};
+		}
+		return {
+			capabilityId: this.asString(details.capabilityId),
+			capabilityName: this.asString(details.capabilityName),
+		};
 	}
 
 	private collectToolLabels(context: unknown, labelsByName: Map<string, string>): void {

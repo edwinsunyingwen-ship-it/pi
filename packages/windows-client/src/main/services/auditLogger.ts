@@ -30,6 +30,7 @@ export class AuditLogger {
 		const keyword = query.keyword?.trim().toLowerCase() ?? "";
 		const files = this.getLogFilePaths(start, end);
 		const entries: AuditLogEntry[] = [];
+		const businessActions = new Set<string>();
 
 		for (const filePath of files) {
 			try {
@@ -40,6 +41,9 @@ export class AuditLogger {
 					}
 					try {
 						const entry = JSON.parse(line) as AuditLogEntry;
+						if (this.matchesQuery(entry, start, end, { ...query, businessAction: "" }, keyword)) {
+							businessActions.add(entry.businessAction);
+						}
 						if (!this.matchesQuery(entry, start, end, query, keyword)) {
 							continue;
 						}
@@ -58,6 +62,7 @@ export class AuditLogger {
 		return {
 			logFilePath: this.logsDirectory,
 			entries: paged,
+			businessActions: Array.from(businessActions).sort(),
 			total: sorted.length,
 			hasMore: offset + limit < sorted.length,
 		};

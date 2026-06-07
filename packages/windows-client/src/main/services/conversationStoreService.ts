@@ -11,6 +11,17 @@ import type {
 	WorkspaceState,
 } from "../../shared/types";
 
+function compareConversationsByCreatedAtDescending(
+	first: StoredAgentConversation,
+	second: StoredAgentConversation,
+): number {
+	const createdAtOrder = second.createdAt.localeCompare(first.createdAt);
+	if (createdAtOrder !== 0) {
+		return createdAtOrder;
+	}
+	return second.updatedAt.localeCompare(first.updatedAt);
+}
+
 export class ConversationStoreService {
 	private readonly storePath = join(app.getPath("userData"), "conversations.json");
 
@@ -62,7 +73,7 @@ export class ConversationStoreService {
 			const normalizedConversations = conversations
 				.map((conversation) => this.normalizeConversation(conversation))
 				.filter((conversation): conversation is StoredAgentConversation => conversation !== null)
-				.sort((first, second) => second.updatedAt.localeCompare(first.updatedAt));
+				.sort(compareConversationsByCreatedAtDescending);
 			if (normalizedConversations.length === 0) {
 				continue;
 			}

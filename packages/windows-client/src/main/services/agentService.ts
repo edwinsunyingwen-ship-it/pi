@@ -471,7 +471,7 @@ export class AgentService {
 	}
 
 	private getCapabilityDisplayName(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string {
-		return capability?.name || call.toolName || call.toolCallId || "未知能力";
+		return capability?.name || call.capabilityName || call.toolName || call.toolCallId || "未知能力";
 	}
 
 	private getCapabilityMeta(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string[] {
@@ -524,12 +524,28 @@ export class AgentService {
 		call: AgentCapabilityCallLog,
 		capabilities: CapabilityConfig[],
 	): CapabilityConfig | undefined {
+		if (call.capabilityId) {
+			const capabilityById = capabilities.find((capability) => capability.id === call.capabilityId);
+			if (capabilityById) {
+				return capabilityById;
+			}
+		}
+
+		if (call.capabilityName) {
+			const capabilityByName = capabilities.find((capability) => capability.name === call.capabilityName);
+			if (capabilityByName) {
+				return capabilityByName;
+			}
+		}
+
 		const haystack = [call.toolName, call.inputSummary, call.outputSummary].filter(Boolean).join("\n").toLowerCase();
 
 		return capabilities.find((capability) => {
+			const normalizedToolName = this.normalizePromptToolName(capability.toolName || capability.name || "http_tool");
 			const candidates = [
 				capability.name,
 				capability.toolName,
+				normalizedToolName,
 				capability.category,
 				capability.useWhen,
 				capability.avoidWhen,

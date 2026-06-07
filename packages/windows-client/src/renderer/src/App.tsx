@@ -186,6 +186,11 @@ const auditActionLabels: Record<string, string> = {
   'capability-invoked': '调用能力',
   'capability-result': '能力返回',
   'test-model-connection': '模型联通测试',
+  'discover-mcp-tools': '发现 MCP 工具',
+  'model-request-context': '模型上下文',
+  'model-request-payload': '模型请求载荷',
+  'model-response': '模型响应',
+  'browser-tool': '浏览器工具',
   'save-agent-config': '保存智能体配置',
   'delete-agent-config': '删除智能体配置',
 };
@@ -979,6 +984,10 @@ function getAuditContentPreview(content: string): string {
     : content;
 }
 
+function getAuditActionLabel(action: string): string {
+  return auditActionLabels[action] ?? action;
+}
+
 function getAuditEntryLogFilePath(logsDirectory: string | null, entry: AuditLogEntry): string | null {
   if (!logsDirectory) {
     return null;
@@ -1492,6 +1501,17 @@ function conversationToStoredConversation(conversation: AgentConversationState):
   };
 }
 
+function compareConversationsByCreatedAtDescending(
+  first: Pick<AgentConversationState, 'createdAt' | 'updatedAt'>,
+  second: Pick<AgentConversationState, 'createdAt' | 'updatedAt'>,
+): number {
+  const createdAtOrder = second.createdAt.localeCompare(first.createdAt);
+  if (createdAtOrder !== 0) {
+    return createdAtOrder;
+  }
+  return second.updatedAt.localeCompare(first.updatedAt);
+}
+
 function createConversationStoreState(
   conversationsByAgentId: Record<string, AgentConversationState[]>,
   activeConversationIdsByAgentId: Record<string, string>,
@@ -1500,7 +1520,9 @@ function createConversationStoreState(
     conversationsByAgentId: Object.fromEntries(
       Object.entries(conversationsByAgentId).map(([agentId, conversations]) => [
         agentId,
-        conversations.map((conversation) => conversationToStoredConversation(conversation)),
+        [...conversations]
+          .sort(compareConversationsByCreatedAtDescending)
+          .map((conversation) => conversationToStoredConversation(conversation)),
       ]),
     ),
     activeConversationIdsByAgentId,
@@ -1545,6 +1567,7 @@ function App(): ReactElement {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFileInfo | null>(null);
   const [fileContent, setFileContent] = useState('');
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
+  const [auditActionOptions, setAuditActionOptions] = useState<string[]>([]);
   const [auditPath, setAuditPath] = useState<string | null>(null);
   const [auditRefreshedAt, setAuditRefreshedAt] = useState<string | null>(null);
   const [auditQuery, setAuditQuery] = useState<AuditLogQuery>(() => createDefaultAuditQuery());
@@ -1713,6 +1736,20 @@ function App(): ReactElement {
     const safePage = Math.min(agentPage, agentTotalPages);
     return agents.slice((safePage - 1) * agentPageSize, safePage * agentPageSize);
   }, [agentPage, agentTotalPages, draftConfig?.agents]);
+  const auditBusinessActionOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...Object.keys(auditActionLabels),
+          ...auditActionOptions,
+          ...auditEntries.map((entry) => entry.businessAction),
+          auditQuery.businessAction ?? '',
+        ]),
+      )
+        .filter(Boolean)
+        .sort((first, second) => getAuditActionLabel(first).localeCompare(getAuditActionLabel(second), 'zh-CN')),
+    [auditActionOptions, auditEntries, auditQuery.businessAction],
+  );
 
   useEffect(() => {
     setModelPage(1);
@@ -1965,6 +2002,7 @@ function App(): ReactElement {
     const nextConversations = existingConversations.some((item) => item.id === nextConversation.id)
       ? existingConversations.map((item) => (item.id === nextConversation.id ? nextConversation : item))
       : [nextConversation, ...existingConversations];
+    nextConversations.sort(compareConversationsByCreatedAtDescending);
     agentConversationsRef.current = {
       ...agentConversationsRef.current,
       [agentId]: nextConversations,
@@ -2251,7 +2289,7 @@ function App(): ReactElement {
         agentId,
         conversations
           .map((conversation) => conversationFromStoredConversation(conversation))
-          .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt)),
+          .sort(compareConversationsByCreatedAtDescending),
       ]),
     );
     for (const agent of nextConfig.config.agents) {
@@ -2283,6 +2321,7 @@ function App(): ReactElement {
     setTools(nextTools);
     setAuditQuery(initialAuditQuery);
     setAuditEntries(sortAuditEntries(nextAudit.entries));
+    setAuditActionOptions(nextAudit.businessActions ?? []);
     setAuditPath(nextAudit.logFilePath);
     setAuditRefreshedAt(new Date().toISOString());
     setAuditTotal(nextAudit.total);
@@ -2303,6 +2342,7 @@ function App(): ReactElement {
     const result = await window.windowsClient.listAuditLogs(nextQuery);
     setAuditQuery(nextQuery);
     setAuditEntries(sortAuditEntries(result.entries));
+    setAuditActionOptions(result.businessActions ?? []);
     setAuditPageInput(String(Math.floor((nextQuery.offset ?? 0) / auditPageSize) + 1));
     setAuditPath(result.logFilePath);
     setAuditRefreshedAt(new Date().toISOString());
@@ -3707,7 +3747,7 @@ function App(): ReactElement {
                 }}
               >
                 <span>{getConversationDisplayTitle(conversation, selectedAgent)}</span>
-                <small>{formatLocalTimestamp(conversation.updatedAt)}</small>
+                <small>{formatLocalTimestamp(conversation.createdAt)}</small>
                 <button
                   type="button"
                   className="sidebar-thread-menu-button"
@@ -5083,9 +5123,9 @@ function App(): ReactElement {
                   }
                 >
                   <option value="">全部类型</option>
-                  {Object.entries(auditActionLabels).map(([value, label]) => (
+                  {auditBusinessActionOptions.map((value) => (
                     <option value={value} key={value}>
-                      {label}
+                      {getAuditActionLabel(value)}
                     </option>
                   ))}
                 </select>
@@ -5170,7 +5210,7 @@ function App(): ReactElement {
 
                     return (
                       <div className="audit-row" key={`${entry.timestamp}-${entry.businessAction}-${entry.toolName}-${index}`}>
-                        <strong>{auditActionLabels[entry.businessAction] ?? entry.businessAction}</strong>
+                        <strong>{getAuditActionLabel(entry.businessAction)}</strong>
                         <span>{formatLocalTimestamp(getAuditStartTime(entry))}</span>
                         <span>{getAuditEndTime(entry) ? formatLocalTimestamp(getAuditEndTime(entry) as string) : '-'}</span>
                         <div className="audit-content-cell">
@@ -5269,7 +5309,7 @@ function App(): ReactElement {
               </button>
             </div>
             <div className="audit-detail-meta">
-              <span>{auditActionLabels[expandedAuditEntry.businessAction] ?? expandedAuditEntry.businessAction}</span>
+              <span>{getAuditActionLabel(expandedAuditEntry.businessAction)}</span>
               <span>{formatLocalTimestamp(getAuditStartTime(expandedAuditEntry))}</span>
               <small className={expandedAuditEntry.status === 'success' ? 'enabled' : 'disabled'}>
                 {expandedAuditEntry.status === 'success' ? '成功' : '失败'}

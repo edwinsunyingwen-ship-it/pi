@@ -148,6 +148,8 @@ export interface ConversationStoreState {
 export interface AgentCapabilityCallLog {
 	toolCallId?: string;
 	toolName: string;
+	capabilityId?: string;
+	capabilityName?: string;
 	inputSummary?: string;
 	outputSummary?: string;
 	fullInput?: string;
@@ -202,6 +204,7 @@ export interface AuditLogQuery {
 export interface AuditLogListResult {
 	logFilePath: string | null;
 	entries: AuditLogEntry[];
+	businessActions: string[];
 	total: number;
 	hasMore: boolean;
 }
