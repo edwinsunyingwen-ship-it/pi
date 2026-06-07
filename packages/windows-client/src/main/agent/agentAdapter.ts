@@ -208,6 +208,14 @@ export class RpcAgentAdapter implements AgentAdapter {
 			detail: "正在准备上下文、模型和可用工具。",
 			status: "running",
 		});
+		if (images?.length) {
+			this.emitProgress(state, {
+				sessionId,
+				title: "正在准备图片附件",
+				detail: `本次消息包含 ${images.length} 个视觉输入，正在交给运行时处理。`,
+				status: "running",
+			});
+		}
 		const waitForEnd = this.waitForAgentEnd(state);
 		let events: RpcEvent[];
 		try {

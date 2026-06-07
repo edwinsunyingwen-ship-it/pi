@@ -626,6 +626,21 @@ function getAttachmentVisionLabel(
   return imageVisionEnabled ? '视觉' : '仅路径';
 }
 
+function mergeProgressEvents(...eventGroups: Array<AgentProgressEvent[] | undefined>): AgentProgressEvent[] {
+  const merged: AgentProgressEvent[] = [];
+  const seenIds = new Set<string>();
+  for (const events of eventGroups) {
+    for (const event of events ?? []) {
+      if (seenIds.has(event.id)) {
+        continue;
+      }
+      seenIds.add(event.id);
+      merged.push(event);
+    }
+  }
+  return merged;
+}
+
 function createCapabilityId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `capability-${Date.now()}`;
 }
@@ -3387,7 +3402,13 @@ function App(): ReactElement {
         outboundMessage,
         canSendVisionImages ? visionImageInputs : undefined,
       );
-      const progressEvents = result.progressEvents ?? assistantItem.progressEvents ?? [];
+      const currentConversation = agentConversationsRef.current[messageAgent.id]?.find(
+        (item) => item.id === messageConversation.id,
+      );
+      const liveProgressEvents =
+        currentConversation?.transcript.find((item) => item.role === 'assistant' && item.createdAt === assistantStartedAt)
+          ?.progressEvents ?? [];
+      const progressEvents = mergeProgressEvents(liveProgressEvents, result.progressEvents, assistantItem.progressEvents);
       const processingEndedAt = result.endedAt ?? result.createdAt;
       const processingDurationMs =
         typeof result.durationMs === 'number'
