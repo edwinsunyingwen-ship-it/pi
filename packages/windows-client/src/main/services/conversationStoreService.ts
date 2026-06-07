@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app } from "electron";
 import type {
+	AgentProgressEvent,
+	AgentProgressEventStatus,
 	ConversationAttachmentMeta,
 	ConversationStoreState,
 	ConversationTranscriptItem,
@@ -117,7 +119,76 @@ export class ConversationStoreService {
 				.map((attachment) => this.normalizeAttachment(attachment))
 				.filter((attachment): attachment is ConversationAttachmentMeta => attachment !== null);
 		}
+		if (Array.isArray(value.progressEvents)) {
+			item.progressEvents = value.progressEvents
+				.map((event) => this.normalizeProgressEvent(event))
+				.filter((event): event is AgentProgressEvent => event !== null);
+		}
+		if (typeof value.processingStartedAt === "string") {
+			item.processingStartedAt = value.processingStartedAt;
+		}
+		if (typeof value.processingEndedAt === "string") {
+			item.processingEndedAt = value.processingEndedAt;
+		}
+		if (typeof value.processingDurationMs === "number" && Number.isFinite(value.processingDurationMs)) {
+			item.processingDurationMs = value.processingDurationMs;
+		}
+		const processingStatus = this.normalizeProgressStatus(value.processingStatus);
+		if (processingStatus) {
+			item.processingStatus = processingStatus;
+		}
+		this.inferMissingProcessingFields(item);
 		return item;
+	}
+
+	private inferMissingProcessingFields(item: ConversationTranscriptItem): void {
+		const events = item.progressEvents ?? [];
+		if (events.length === 0) {
+			return;
+		}
+		item.processingStartedAt = item.processingStartedAt ?? events[0]?.timestamp;
+		item.processingStatus = item.processingStatus ?? events.at(-1)?.status;
+		if (!item.processingEndedAt) {
+			const finalEvent = [...events]
+				.reverse()
+				.find((event) => event.status === "success" || event.status === "failure");
+			item.processingEndedAt = finalEvent?.timestamp;
+		}
+	}
+
+	private normalizeProgressEvent(value: unknown): AgentProgressEvent | null {
+		if (!this.isRecord(value)) {
+			return null;
+		}
+
+		const status = this.normalizeProgressStatus(value.status);
+		if (
+			typeof value.id !== "string" ||
+			typeof value.sessionId !== "string" ||
+			typeof value.timestamp !== "string" ||
+			typeof value.title !== "string" ||
+			!status
+		) {
+			return null;
+		}
+
+		return {
+			id: value.id,
+			sessionId: value.sessionId,
+			timestamp: value.timestamp,
+			title: value.title,
+			detail: typeof value.detail === "string" ? value.detail : undefined,
+			status,
+			durationMs:
+				typeof value.durationMs === "number" && Number.isFinite(value.durationMs) ? value.durationMs : undefined,
+		};
+	}
+
+	private normalizeProgressStatus(value: unknown): AgentProgressEventStatus | null {
+		if (value === "running" || value === "success" || value === "failure" || value === "info") {
+			return value;
+		}
+		return null;
 	}
 
 	private normalizeAttachment(value: unknown): ConversationAttachmentMeta | null {
