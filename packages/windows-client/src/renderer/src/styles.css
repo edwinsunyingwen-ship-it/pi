@@ -4042,16 +4042,9 @@ select:focus {
 }
 
 .app-brand-mark {
-  align-items: center;
-  background: #101828;
   border-radius: 6px;
-  color: #fff;
-  display: inline-flex;
-  font-size: 0.78rem;
-  font-weight: 900;
   height: 22px;
-  justify-content: center;
-  line-height: 1;
+  object-fit: contain;
   width: 22px;
 }
 

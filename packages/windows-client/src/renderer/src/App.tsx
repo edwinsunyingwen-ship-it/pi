@@ -59,6 +59,7 @@ import { InlineNotice } from './components/ui/InlineNotice';
 import { PaginationBar } from './components/ui/PaginationBar';
 import { highlightSearchText, searchConversations } from './conversation-search';
 import type { ConversationSearchMatch, SearchableConversation } from './conversation-search';
+import staixLogoUrl from './assets/staix.png';
 import './styles.css';
 
 interface TranscriptItem {
@@ -276,7 +277,7 @@ const providerPresets: ProviderPreset[] = [
     api: 'openai-completions',
     apiKeyEnv: 'MOONSHOT_API_KEY',
     baseUrl: 'https://api.moonshot.cn/v1',
-    note: 'Pi 内置 Provider，适合 Moonshot / Kimi 官方 API。',
+    note: '石斧智能体内置 Provider，适合 Moonshot / Kimi 官方 API。',
     models: ['kimi-k2', 'kimi-latest', 'kimi-thinking-preview'],
     needsBaseUrl: false,
     needsApiKey: true,
@@ -288,7 +289,7 @@ const providerPresets: ProviderPreset[] = [
     api: 'anthropic-messages',
     apiKeyEnv: 'MINIMAX_CN_API_KEY',
     baseUrl: 'https://api.minimaxi.com/anthropic',
-    note: 'Pi 内置 Provider，适合 MiniMax 中国区 API。',
+    note: '石斧智能体内置 Provider，适合 MiniMax 中国区 API。',
     models: ['MiniMax-M2', 'MiniMax-Text-01'],
     needsBaseUrl: false,
     needsApiKey: true,
@@ -300,7 +301,7 @@ const providerPresets: ProviderPreset[] = [
     api: 'openai-completions',
     apiKeyEnv: 'ZAI_API_KEY',
     baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-    note: 'Pi 内置 OpenAI 兼容 Provider。',
+    note: '石斧智能体内置 OpenAI 兼容 Provider。',
     models: ['glm-4.6', 'glm-4.5', 'glm-4.5-air'],
     needsBaseUrl: false,
     needsApiKey: true,
@@ -312,7 +313,7 @@ const providerPresets: ProviderPreset[] = [
     api: 'anthropic-messages',
     apiKeyEnv: 'KIMI_API_KEY',
     baseUrl: 'https://api.kimi.com/coding',
-    note: 'Pi 内置 Provider，偏代码场景。',
+    note: '石斧智能体内置 Provider，偏代码场景。',
     models: ['kimi-for-coding'],
     needsBaseUrl: false,
     needsApiKey: true,
@@ -547,12 +548,12 @@ function formatAttachmentForPrompt(
     return `${header}${sourcePathLine}\nkind: image\ncontent: sent as a vision input using the local file path.`;
   }
   if (attachment.kind === 'text') {
-    return `${header}${sourcePathLine}\nkind: text\ncontent: not inlined. Use the available path and existing Pi tools such as read when the task needs file contents.`;
+      return `${header}${sourcePathLine}\nkind: text\ncontent: not inlined. Use the available path and existing runtime tools such as read when the task needs file contents.`;
   }
   if (attachment.kind === 'document') {
-    return `${header}${sourcePathLine}\nkind: document\ncontent: not inlined. Use the available path and existing Pi tools/commands to inspect or extract document text when needed.`;
+    return `${header}${sourcePathLine}\nkind: document\ncontent: not inlined. Use the available path and existing runtime tools/commands to inspect or extract document text when needed.`;
   }
-  return `${header}${sourcePathLine}\nkind: file\ncontent: not inlined. If a path is present, use existing Pi tools/commands when the task needs this file.`;
+  return `${header}${sourcePathLine}\nkind: file\ncontent: not inlined. If a path is present, use existing runtime tools/commands when the task needs this file.`;
 }
 
 function buildMessageWithAttachments(
@@ -573,7 +574,7 @@ function buildMessageWithAttachments(
     imageVisionEnabled && imageVisionSupported
       ? 'Image attachments with local file paths may also be sent as vision inputs. Non-image attachment contents are not inlined.'
       : 'Only attachment metadata is provided here. Attachment contents are not inlined.',
-    'Use existing Pi tools such as read and bash to inspect attached files by absolute path when the task needs file contents.',
+    'Use existing runtime tools such as read and bash to inspect attached files by absolute path when the task needs file contents.',
     'Do not require a workspace merely to read or analyze an attached file. Workspace selection is only needed when no output location can be inferred or when writing files requires a target directory.',
     'If the user asks to write output in the same directory as an attachment and that attachment has a path, use the attachment path directory as the intended output directory.',
     `Current workspace: ${workspacePath ?? 'not selected'}`,
@@ -3650,9 +3651,9 @@ function App(): ReactElement {
         >
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
-        <div className="app-brand" aria-label="Aidocs Pro">
-          <span className="app-brand-mark">A</span>
-          <span className="app-brand-name">Aidocs Pro</span>
+        <div className="app-brand" aria-label="石斧智能体">
+          <img className="app-brand-mark" src={staixLogoUrl} alt="" aria-hidden="true" />
+          <span className="app-brand-name">石斧智能体</span>
         </div>
         <nav className="app-menu" aria-label="应用菜单">
           {(Object.keys(appMenus) as AppMenuName[]).map((menuName) => (
@@ -3783,7 +3784,7 @@ function App(): ReactElement {
       <header className="top-bar">
         <div>
           <p className="eyebrow">Windows 客户端</p>
-          <h1>Pi 智能体工作台</h1>
+          <h1>石斧智能体工作台</h1>
         </div>
         <div className="status-pill">
           <CheckCircle2 size={16} />
@@ -4081,7 +4082,7 @@ function App(): ReactElement {
                           }}
                         >
                           <div className="message-meta">
-                            <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+                            <strong>{item.role === 'user' ? '用户' : '石斧智能体'}</strong>
                             <time dateTime={item.createdAt}>{formatLocalTimestamp(item.createdAt)}</time>
                           </div>
                           {item.text ? (
@@ -4449,11 +4450,11 @@ function App(): ReactElement {
               </div>
               <div className="conversation-list">
                 {transcript.length === 0 ? (
-                  <p className="empty-state">启动会话后发送一条消息，用于验证本地 Pi RPC 回复。</p>
+                  <p className="empty-state">启动会话后发送一条消息，用于验证本地石斧智能体运行时回复。</p>
                 ) : (
                   transcript.map((item) => (
                     <div className={`message-bubble ${item.role}`} key={`${item.createdAt}-${item.role}`}>
-                      <strong>{item.role === 'user' ? '用户' : 'Pi 智能体'}</strong>
+                      <strong>{item.role === 'user' ? '用户' : '石斧智能体'}</strong>
                       <MarkdownMessage text={item.text} />
                       <AttachmentList attachments={item.attachments} />
                     </div>
@@ -4467,7 +4468,7 @@ function App(): ReactElement {
                     saveCurrentConversation({ draftMessage: event.target.value });
                   }}
                   onKeyDown={handleComposerKeyDown}
-                  placeholder="向 Pi 智能体发送一条测试消息"
+                  placeholder="向石斧智能体发送一条测试消息"
                   rows={3}
                 />
                 <button type="button" disabled={!canSend} onClick={sendMessage}>
@@ -4627,7 +4628,7 @@ function App(): ReactElement {
                 <div className="section-title-row">
                   <div>
                     <strong>智能体内核 / RPC</strong>
-                    <span>控制客户端连接内置子进程还是外部 Pi RPC 服务。</span>
+                    <span>控制客户端连接内置子进程还是外部石斧智能体运行时服务。</span>
                   </div>
                   <button type="button" onClick={saveAgentCoreConfig}>
                     <Save size={16} />
@@ -5947,7 +5948,7 @@ function App(): ReactElement {
 
               <div className="form-section-heading wide-field">
                 <strong>连接信息</strong>
-                <span>普通用户直接粘贴 API Key 即可，客户端会在背后交给 Pi RPC 使用。</span>
+                <span>普通用户直接粘贴 API Key 即可，客户端会在背后交给石斧智能体运行时使用。</span>
               </div>
               {modelEditorRequirements.needsApiKey && (
                 <label>
@@ -5973,7 +5974,7 @@ function App(): ReactElement {
                 <small className="field-hint">
                   {modelEditor.setupMode === 'official-api-key'
                     ? '官方内置 Provider 可留空；只有代理或网关场景才需要覆盖。'
-                    : 'Pi 的 models.json 需要用它定位兼容 API 地址。'}
+                    : '石斧智能体的 models.json 需要用它定位兼容 API 地址。'}
                 </small>
               </label>
               {!modelEditorRequirements.needsApiKey && (

@@ -476,7 +476,7 @@ export class AgentService {
 
 	private getCapabilityMeta(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string[] {
 		const type = capability ? this.getCapabilityTypeLabel(capability) : this.getBuiltinToolType(call.toolName);
-		const execution = capability ? this.getCapabilityExecutionLabel(capability) : "Pi 内置工具";
+		const execution = capability ? this.getCapabilityExecutionLabel(capability) : "石斧智能体内置工具";
 		const parts = [
 			`能力：${this.getCapabilityDisplayName(call, capability)}`,
 			`工具：${call.toolName || "未知工具"}`,
@@ -705,7 +705,7 @@ export class AgentService {
 		return [
 			"# Windows 客户端智能体配置",
 			"",
-			"以下内容来自 Windows 客户端的可视化配置，用于补充 Pi 内核默认 system prompt。",
+			"以下内容来自 Windows 客户端的可视化配置，用于补充石斧智能体运行时默认 system prompt。",
 			"",
 			"## 当前智能体",
 			`- 名称：${agent.name}`,
@@ -732,7 +732,7 @@ export class AgentService {
 			"## 当前工作区",
 			`- 路径：${workspacePath || "未选择"}`,
 			"- 工作区只是默认工作目录；未选择工作区不代表不能处理用户提供的附件或绝对路径文件。",
-			"- 如果用户消息、附件清单或上下文中提供了绝对路径或可访问路径，优先使用现有 Pi 工具读取该路径，不要要求用户先选择工作区。",
+			"- 如果用户消息、附件清单或上下文中提供了绝对路径或可访问路径，优先使用现有石斧智能体工具读取该路径，不要要求用户先选择工作区。",
 			"- 只有在需要创建/写入文件且无法从用户要求、附件路径或上下文推断输出目录时，才要求用户选择工作区或指定输出位置。",
 			"- 不要声称已经读取未实际读取的文件；依据不足时说明需要用户选择文件或补充材料。",
 			"",
@@ -752,7 +752,7 @@ export class AgentService {
 		const lines = [
 			"## 已绑定业务能力",
 			"",
-			"这些能力来自用户配置，可能是工具、技能、命令、MCP、浏览器或业务说明。只有在 Pi 工具列表中实际存在对应工具时才可以直接调用；否则把它们作为业务背景、命令线索或任务规划依据。",
+			"这些能力来自用户配置，可能是工具、技能、命令、MCP、浏览器或业务说明。只有在石斧智能体工具列表中实际存在对应工具时才可以直接调用；否则把它们作为业务背景、命令线索或任务规划依据。",
 		];
 		if (capabilities.length === 0) {
 			lines.push("", "未绑定已启用的业务能力。");
@@ -868,7 +868,7 @@ export class AgentService {
 
 	private getCapabilityPromptStatus(capability: CapabilityConfig): string {
 		if (this.getCapabilityCallableName(capability)) {
-			return "存在可映射的 Pi 工具时可直接调用；否则按业务背景或命令线索处理。";
+			return "存在可映射的石斧智能体工具时可直接调用；否则按业务背景或命令线索处理。";
 		}
 		if (capability.command.trim()) {
 			return "这是命令型能力；需要通过 shell/命令工具执行，并先确认本地已安装和已配置。";

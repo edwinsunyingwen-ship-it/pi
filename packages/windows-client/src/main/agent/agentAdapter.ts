@@ -157,7 +157,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 		rpcProcess.on("exit", () => {
 			for (const pending of state.pending.values()) {
 				clearTimeout(pending.timer);
-				pending.reject(new Error(`Pi RPC 子进程已退出。${state.stderr}`));
+				pending.reject(new Error(`石斧智能体运行时子进程已退出。${state.stderr}`));
 			}
 			state.pending.clear();
 			state.session = { ...state.session, state: "stopped" };
@@ -168,7 +168,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 		await new Promise((resolve) => setTimeout(resolve, 200));
 		if (rpcProcess.exitCode !== null) {
 			this.sessions.delete(session.id);
-			throw new Error(`Pi RPC 子进程启动失败，退出码 ${rpcProcess.exitCode}。${state.stderr}`);
+			throw new Error(`石斧智能体运行时子进程启动失败，退出码 ${rpcProcess.exitCode}。${state.stderr}`);
 		}
 
 		await this.sendCommand(state, { type: "new_session" });
@@ -237,10 +237,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 		const responseText =
 			this.extractAssistantText(events) ||
 			(await this.getLastAssistantText(state)) ||
-			"Pi RPC 已完成本轮处理，但没有返回可展示的文本内容。";
-		if (!responseText.trim() || responseText.startsWith("Pi RPC")) {
+			"石斧智能体运行时已完成本轮处理，但没有返回可展示的文本内容。";
+		if (!responseText.trim() || responseText.startsWith("石斧智能体运行时")) {
 			state.session = { ...state.session, state: "idle" };
-			throw new Error("Pi RPC 已完成本轮处理，但没有收到模型返回的文本内容。");
+			throw new Error("石斧智能体运行时已完成本轮处理，但没有收到模型返回的文本内容。");
 		}
 		state.session = { ...state.session, state: "idle" };
 		const endedAt = new Date().toISOString();
@@ -320,7 +320,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			},
 			{
 				name: "pi-rpc-core",
-				businessAction: "本地 Pi RPC 子进程桥接",
+				businessAction: "本地石斧智能体运行时子进程桥接",
 				enabled: true,
 			},
 		];
@@ -1370,13 +1370,13 @@ export default function (pi) {
 		return new Promise((resolvePromise, rejectPromise) => {
 			const timer = setTimeout(() => {
 				state.pending.delete(id);
-				rejectPromise(new Error(`等待 Pi RPC 响应超时：${String(command.type)}。${state.stderr}`));
+				rejectPromise(new Error(`等待石斧智能体运行时响应超时：${String(command.type)}。${state.stderr}`));
 			}, timeoutMs);
 
 			state.pending.set(id, {
 				resolve: (response) => {
 					if (!response.success) {
-						rejectPromise(new Error(response.error ?? `Pi RPC 命令失败：${response.command}`));
+						rejectPromise(new Error(response.error ?? `石斧智能体运行时命令失败：${response.command}`));
 						return;
 					}
 					resolvePromise(response);
@@ -1427,7 +1427,7 @@ export default function (pi) {
 			const startedAt = state.events.length;
 			const timer = setTimeout(() => {
 				clearInterval(interval);
-				rejectPromise(new Error(`等待 Pi 智能体回复超时。${state.stderr}`));
+				rejectPromise(new Error(`等待石斧智能体回复超时。${state.stderr}`));
 			}, timeoutMs);
 
 			const interval = setInterval(() => {
@@ -1856,7 +1856,7 @@ export default function (pi) {
 		});
 		const assistant = [...messages].reverse().find((message) => message.role === "assistant");
 		if (assistant?.stopReason === "error") {
-			return assistant.errorMessage || "模型调用失败，但 Pi RPC 未返回具体错误。";
+			return assistant.errorMessage || "模型调用失败，但石斧智能体运行时未返回具体错误。";
 		}
 		return null;
 	}

@@ -33,6 +33,7 @@ const conversationStoreService = new ConversationStoreService();
 const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
 const mainDir = dirname(fileURLToPath(import.meta.url));
+const appIconPath = join(mainDir, "../../build/icon.ico");
 
 function normalizeLocalPath(input: string): string {
 	const trimmedInput = input.trim();
@@ -91,7 +92,8 @@ function createWindow(): void {
 		height: 760,
 		minWidth: 980,
 		minHeight: 640,
-		title: "Pi 智能体客户端",
+		title: "石斧智能体客户端",
+		icon: appIconPath,
 		autoHideMenuBar: true,
 		backgroundColor: "#f6f5f2",
 		titleBarOverlay: {

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Windows desktop client for Pi agent workflows.",
+  "description": "Windows desktop client for StAix agent workflows.",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,12 +14,13 @@
   },
   "build": {
     "appId": "works.earendil.pi.windows-client",
-    "productName": "Pi Agent",
+    "productName": "石斧智能体",
     "directories": {
       "output": "release"
     },
     "files": [
       "out/**/*",
+      "build/icon.ico",
       "package.json"
     ],
     "extraResources": [
@@ -108,6 +109,7 @@
       "target": [
         "nsis"
       ],
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false,
       "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
     },
@@ -116,7 +118,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Pi Agent",
+      "shortcutName": "石斧智能体",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "customNsisBinary": {
         "url": "https://repo.huaweicloud.com/repository/toolkit/electron-builder-binaries/nsis-3.0.4.1/nsis-3.0.4.1.7z",
         "checksum": "VKMiizYdmNdJOWpRGz4trl4lD++BvYP2irAXpMilheUP0pc93iKlWAoP843Vlraj8YG19CVn0j+dCo/hURz9+Q==",
