@@ -12,6 +12,8 @@
  */
 
 import * as crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type {
 	ExtensionUIContext,
@@ -20,6 +22,8 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
+import { resizeImage } from "../../utils/image-resize.js";
+import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { type Theme, theme } from "../interactive/theme/theme.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
@@ -27,10 +31,39 @@ import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
+	RpcImageInput,
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
 } from "./rpc-types.js";
+
+async function resolveRpcImages(images: RpcImageInput[] | undefined): Promise<ImageContent[] | undefined> {
+	if (!images?.length) {
+		return undefined;
+	}
+
+	const resolved: ImageContent[] = [];
+	for (const image of images) {
+		if (image.type === "image") {
+			resolved.push(image);
+			continue;
+		}
+
+		const mimeType = await detectSupportedImageMimeTypeFromFile(image.path);
+		if (!mimeType) {
+			throw new Error(`Unsupported image attachment: ${image.path}`);
+		}
+
+		const data = (await readFile(image.path)).toString("base64");
+		const resized = await resizeImage({ type: "image", data, mimeType });
+		if (!resized) {
+			throw new Error(`Image attachment is too large to send to the model: ${image.path}`);
+		}
+		resolved.push({ type: "image", data: resized.data, mimeType: resized.mimeType });
+	}
+
+	return resolved.length > 0 ? resolved : undefined;
+}
 
 // Re-export types for consumers
 export type {
@@ -380,9 +413,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
+				const images = await resolveRpcImages(command.images);
 				void session
 					.prompt(command.message, {
-						images: command.images,
+						images,
 						streamingBehavior: command.streamingBehavior,
 						source: "rpc",
 						preflightResult: (didSucceed) => {
@@ -401,12 +435,14 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "steer": {
-				await session.steer(command.message, command.images);
+				const images = await resolveRpcImages(command.images);
+				await session.steer(command.message, images);
 				return success(id, "steer");
 			}
 
 			case "follow_up": {
-				await session.followUp(command.message, command.images);
+				const images = await resolveRpcImages(command.images);
+				await session.followUp(command.message, images);
 				return success(id, "follow_up");
 			}
 

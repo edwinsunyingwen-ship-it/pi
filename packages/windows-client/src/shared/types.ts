@@ -95,6 +95,15 @@ export interface AgentImageContent {
 	mimeType: string;
 }
 
+export interface AgentImageFileContent {
+	type: "image_file";
+	path: string;
+	mimeType?: string;
+	name?: string;
+}
+
+export type AgentImageInput = AgentImageContent | AgentImageFileContent;
+
 export interface ConversationAttachmentMeta {
 	id: string;
 	name: string;
@@ -463,7 +472,7 @@ export interface WindowsClientApi {
 	sendAgentUserMessage: (
 		sessionId: string,
 		message: string,
-		images?: AgentImageContent[],
+		images?: AgentImageInput[],
 	) => Promise<AgentMessageResult>;
 	onAgentProgress: (handler: (event: AgentProgressEvent) => void) => () => void;
 	listAvailableTools: () => Promise<AgentToolInfo[]>;

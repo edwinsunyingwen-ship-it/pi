@@ -3036,6 +3036,69 @@ select:focus {
   opacity: 0.56;
 }
 
+.composer-vision-toggle {
+  align-items: center;
+  background: #f0ede8;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-muted);
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px 0 8px;
+}
+
+.composer-vision-toggle:hover:not(:disabled) {
+  background: #e5eee8;
+  color: var(--color-primary);
+}
+
+.composer-vision-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.composer-vision-switch {
+  align-items: center;
+  background: #cbd5e1;
+  border-radius: 999px;
+  display: inline-flex;
+  height: 20px;
+  justify-content: flex-start;
+  padding: 2px;
+  width: 36px;
+}
+
+.composer-vision-switch > span {
+  background: #fff;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 22%);
+  height: 16px;
+  width: 16px;
+}
+
+.composer-vision-toggle.enabled .composer-vision-switch {
+  background: #22a06b;
+  justify-content: flex-end;
+}
+
+.composer-vision-hint,
+.composer-attachment-status {
+  color: var(--color-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.composer-attachment-status {
+  background: #e8f7ef;
+  border-radius: 999px;
+  color: #168457;
+  padding: 2px 7px;
+}
+
 .task-template-select {
   min-width: 0;
   width: 210px;
@@ -4560,6 +4623,33 @@ select:focus {
 .app-shell > .dashboard-grid .composer-tool-button:hover:not(:disabled) {
   background: #f3f6fb;
   color: #101828;
+}
+
+.app-shell > .dashboard-grid .composer-vision-toggle {
+  background: transparent;
+  border-radius: 999px;
+  color: #475467;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 0 9px 0 6px;
+}
+
+.app-shell > .dashboard-grid .composer-vision-toggle:hover:not(:disabled) {
+  background: #f3f6fb;
+  color: #101828;
+}
+
+.app-shell > .dashboard-grid .composer-vision-switch {
+  height: 20px;
+  width: 36px;
+}
+
+.app-shell > .dashboard-grid .composer-vision-hint {
+  color: #667085;
+}
+
+.app-shell > .dashboard-grid .composer-attachment-status {
+  flex: 0 0 auto;
 }
 
 .app-shell > .dashboard-grid .task-template-select {

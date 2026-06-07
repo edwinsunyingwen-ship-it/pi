@@ -12,15 +12,30 @@ import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { SourceInfo } from "../../core/source-info.js";
 
+export interface RpcImageFileInput {
+	type: "image_file";
+	path: string;
+	mimeType?: string;
+	name?: string;
+}
+
+export type RpcImageInput = ImageContent | RpcImageFileInput;
+
 // ============================================================================
 // RPC Commands (stdin)
 // ============================================================================
 
 export type RpcCommand =
 	// Prompting
-	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
-	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
+	| {
+			id?: string;
+			type: "prompt";
+			message: string;
+			images?: RpcImageInput[];
+			streamingBehavior?: "steer" | "followUp";
+	  }
+	| { id?: string; type: "steer"; message: string; images?: RpcImageInput[] }
+	| { id?: string; type: "follow_up"; message: string; images?: RpcImageInput[] }
 	| { id?: string; type: "abort" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 

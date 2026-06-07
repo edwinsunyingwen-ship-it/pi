@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图片理解附件原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f9fc;
+      --surface: #ffffff;
+      --surface-soft: #f3f7fb;
+      --line: #dbe4f0;
+      --line-strong: #b9c9df;
+      --text: #17233a;
+      --muted: #6b7890;
+      --brand: #1f63d8;
+      --brand-soft: #e8f0ff;
+      --success: #168457;
+      --success-soft: #e8f7ef;
+      --warning: #a05d00;
+      --warning-soft: #fff4df;
+      --danger: #c23b3b;
+      --shadow: 0 18px 48px rgba(26, 45, 74, 0.10);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+    }
+
+    .agent-tabs {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      padding: 10px 18px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid #e7edf5;
+    }
+
+    .tab {
+      border: 1px solid transparent;
+      background: #f3f6fb;
+      color: #304158;
+      font-weight: 700;
+      font-size: 17px;
+      padding: 13px 22px;
+      border-radius: 14px;
+      white-space: nowrap;
+    }
+
+    .tab.active {
+      color: #1557d0;
+      background: #eaf2ff;
+      border-color: #c8dafc;
+    }
+
+    .tab.add {
+      margin-left: auto;
+      width: 62px;
+      padding: 13px 0;
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .workspace {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 28px 32px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid #e7edf5;
+    }
+
+    .workspace-label {
+      color: #50617a;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .workspace-path {
+      font-size: 23px;
+      font-weight: 800;
+      color: #09172f;
+    }
+
+    .tools {
+      display: flex;
+      align-items: center;
+      gap: 26px;
+      color: #40516b;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tool {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ready {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid #bce7d0;
+      background: var(--success-soft);
+      color: #112238;
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 0 5px rgba(22, 132, 87, 0.12);
+    }
+
+    .messages {
+      padding: 38px 34px 26px;
+      overflow: hidden;
+    }
+
+    .message {
+      max-width: 960px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 18px;
+      padding: 18px 24px 22px;
+      box-shadow: 0 10px 28px rgba(34, 52, 84, 0.06);
+      margin-bottom: 28px;
+    }
+
+    .message.user {
+      margin-left: auto;
+      max-width: 590px;
+      background: #eaf2ff;
+      border-color: #c8dafe;
+    }
+
+    .message-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      color: #6b7890;
+      font-weight: 700;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e0e7f0;
+    }
+
+    .message-body {
+      padding-top: 15px;
+      line-height: 1.8;
+      font-size: 17px;
+    }
+
+    .composer {
+      margin: 0;
+      background: var(--surface);
+      border-top: 1px solid #9eb1ca;
+      border-radius: 26px 26px 0 0;
+      box-shadow: 0 -16px 42px rgba(36, 56, 90, 0.10);
+      padding: 22px 26px 16px;
+    }
+
+    .composer textarea {
+      width: 100%;
+      min-height: 74px;
+      border: 0;
+      outline: 0;
+      resize: none;
+      color: var(--text);
+      font-size: 18px;
+      font-family: inherit;
+    }
+
+    .composer textarea::placeholder {
+      color: #8a94a6;
+    }
+
+    .attachment-panel {
+      margin-top: 10px;
+    }
+
+    .attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .chip {
+      display: inline-grid;
+      grid-template-columns: auto minmax(120px, auto) auto auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 42px;
+      max-width: 430px;
+      border: 1px solid #d6e0ed;
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 10px 8px 13px;
+      color: #24334b;
+    }
+
+    .chip-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .chip small {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .badge.vision {
+      background: var(--success-soft);
+      color: #116041;
+    }
+
+    .badge.path {
+      background: #eef2f7;
+      color: #526176;
+    }
+
+    .badge.warn {
+      background: var(--warning-soft);
+      color: var(--warning);
+    }
+
+    .remove {
+      border: 0;
+      background: transparent;
+      color: #6a7890;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+
+    .composer-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .vision-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #304158;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .vision-hint {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .switch {
+      width: 46px;
+      height: 26px;
+      border: 0;
+      border-radius: 999px;
+      background: #cdd7e6;
+      padding: 3px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .switch.on {
+      background: #1f8f62;
+      justify-content: flex-end;
+    }
+
+    .knob {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 5px rgba(15, 28, 48, 0.24);
+    }
+
+    .composer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      margin-top: 16px;
+    }
+
+    .plus {
+      width: 38px;
+      height: 38px;
+      border: 0;
+      background: transparent;
+      color: #33445f;
+      font-size: 32px;
+      line-height: 1;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .stop {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      border: 0;
+      background: transparent;
+      color: #43526a;
+      font-weight: 800;
+      font-size: 16px;
+    }
+
+    .checkbox {
+      width: 19px;
+      height: 19px;
+      border: 2px solid #53647c;
+      border-radius: 4px;
+    }
+
+    .send {
+      border: 0;
+      background: #14213a;
+      color: #fff;
+      border-radius: 999px;
+      padding: 14px 25px;
+      font-size: 18px;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      box-shadow: 0 10px 24px rgba(20, 33, 58, 0.22);
+    }
+
+    @media (max-width: 1100px) {
+      .vision-hint {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <nav class="agent-tabs" aria-label="智能体">
+      <button class="tab">默认智能体</button>
+      <button class="tab">法务智能体</button>
+      <button class="tab active">OCR识别专家</button>
+      <button class="tab">合同审查智能体</button>
+      <button class="tab">合规风控智能体</button>
+      <button class="tab">浏览器助手</button>
+      <button class="tab add" aria-label="新增智能体">+</button>
+    </nav>
+
+    <section class="workspace">
+      <div>
+        <div class="workspace-label">工作区</div>
+        <div class="workspace-path">D:\下载</div>
+      </div>
+      <div class="tools">
+        <span class="tool">▣ 工作区</span>
+        <span class="tool">▤ 上下文</span>
+        <span class="tool">⚙ 智能体设置</span>
+        <span class="ready"><span class="dot"></span>已就绪</span>
+      </div>
+    </section>
+
+    <section class="messages">
+      <article class="message user">
+        <div class="message-head">
+          <span>用户</span>
+          <span>2026/6/4 23:30:41</span>
+        </div>
+        <div class="message-body">api失败是因为一次只能传入一张图，不能2张，修正后尝试</div>
+      </article>
+
+      <article class="message">
+        <div class="message-head">
+          <span>Pi 智能体</span>
+          <span>2026/6/4 23:31:24</span>
+        </div>
+        <div class="message-body">
+          已完成巴基斯坦 NICOP 证件的 OCR 识别 prompt 设计。当前智能体支持图片理解时，上传图片会作为图片输入发送给模型；关闭图片理解后，只保留附件路径和元数据。
+        </div>
+      </article>
+    </section>
+
+    <section class="composer" aria-label="消息输入区">
+      <textarea placeholder="向当前智能体发送消息"></textarea>
+
+      <div class="attachment-panel">
+        <div class="attachments" aria-label="已添加附件">
+          <span class="chip">
+            <span aria-hidden="true">▧</span>
+            <span class="chip-name">snicopQr.webp</span>
+            <small>41.8 KB</small>
+            <span class="badge vision">● 图片理解</span>
+            <button class="remove" aria-label="移除 snicopQr.webp">×</button>
+          </span>
+          <span class="chip">
+            <span aria-hidden="true">▧</span>
+            <span class="chip-name">nicop-front.webp</span>
+            <small>63.2 KB</small>
+            <span class="badge vision">● 图片理解</span>
+            <button class="remove" aria-label="移除 nicop-front.webp">×</button>
+          </span>
+          <span class="chip">
+            <span aria-hidden="true">▤</span>
+            <span class="chip-name">识别规则.md</span>
+            <small>8.4 KB</small>
+            <span class="badge path">路径读取</span>
+            <button class="remove" aria-label="移除 识别规则.md">×</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="composer-bottom">
+        <div class="composer-left">
+          <button class="plus" aria-label="添加附件">+</button>
+          <label class="vision-toggle" title="开启后，本次消息中的图片会作为视觉输入发送给当前模型">
+            <button class="switch on" aria-pressed="true" aria-label="开启视觉">
+              <span class="knob"></span>
+            </button>
+            <span>开启视觉</span>
+          </label>
+          <span class="vision-hint">2 张图片将发送给模型，1 个文件仅保留路径</span>
+        </div>
+        <div class="actions">
+          <button class="stop"><span class="checkbox"></span>停止</button>
+          <button class="send"><span aria-hidden="true">➤</span>发送</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import type {
   AgentConfig,
+  AgentImageInput,
   AgentKnowledgeItem,
   AgentModelContextPreview,
   AgentModelInteractionLog,
@@ -518,13 +519,27 @@ async function createImagePreviewDataUrl(file: File): Promise<string | undefined
   };
 }
 
-function formatAttachmentForPrompt(attachment: ComposerAttachment, index: number): string {
+function formatAttachmentForPrompt(
+  attachment: ComposerAttachment,
+  index: number,
+  imageVisionEnabled: boolean,
+  imageVisionSupported: boolean,
+): string {
   const header = `Attachment ${index + 1}: ${attachment.name} (${attachment.type || 'unknown'}, ${formatBytes(attachment.size)})`;
   const sourcePathLine = attachment.sourcePath
     ? `\npath: ${attachment.sourcePath}`
     : '\npath: unavailable';
   if (attachment.kind === 'image') {
-    return `${header}${sourcePathLine}\nkind: image\ncontent: not inlined. No image payload was sent to the model.`;
+    if (!attachment.sourcePath) {
+      return `${header}${sourcePathLine}\nkind: image\ncontent: not sent as a vision input because no local file path is available.`;
+    }
+    if (!imageVisionSupported) {
+      return `${header}${sourcePathLine}\nkind: image\ncontent: not sent as a vision input because the current model does not support image input.`;
+    }
+    if (!imageVisionEnabled) {
+      return `${header}${sourcePathLine}\nkind: image\ncontent: not sent as a vision input because the user disabled vision for this message.`;
+    }
+    return `${header}${sourcePathLine}\nkind: image\ncontent: sent as a vision input using the local file path.`;
   }
   if (attachment.kind === 'text') {
     return `${header}${sourcePathLine}\nkind: text\ncontent: not inlined. Use the available path and existing Pi tools such as read when the task needs file contents.`;
@@ -535,7 +550,13 @@ function formatAttachmentForPrompt(attachment: ComposerAttachment, index: number
   return `${header}${sourcePathLine}\nkind: file\ncontent: not inlined. If a path is present, use existing Pi tools/commands when the task needs this file.`;
 }
 
-function buildMessageWithAttachments(message: string, attachments: ComposerAttachment[], workspacePath: string | null): string {
+function buildMessageWithAttachments(
+  message: string,
+  attachments: ComposerAttachment[],
+  workspacePath: string | null,
+  imageVisionEnabled: boolean,
+  imageVisionSupported: boolean,
+): string {
   if (attachments.length === 0) {
     return message;
   }
@@ -544,13 +565,17 @@ function buildMessageWithAttachments(message: string, attachments: ComposerAttac
     '',
     '<client_attachment_manifest>',
     'The user attached files to this conversation. Treat this as internal context and do not repeat the manifest verbatim to the user.',
-    'Only attachment metadata is provided here. The client did not inline attachment contents or send image payloads to the model.',
+    imageVisionEnabled && imageVisionSupported
+      ? 'Image attachments with local file paths may also be sent as vision inputs. Non-image attachment contents are not inlined.'
+      : 'Only attachment metadata is provided here. Attachment contents are not inlined.',
     'Use existing Pi tools such as read and bash to inspect attached files by absolute path when the task needs file contents.',
     'Do not require a workspace merely to read or analyze an attached file. Workspace selection is only needed when no output location can be inferred or when writing files requires a target directory.',
     'If the user asks to write output in the same directory as an attachment and that attachment has a path, use the attachment path directory as the intended output directory.',
     `Current workspace: ${workspacePath ?? 'not selected'}`,
     '',
-    attachments.map((attachment, index) => formatAttachmentForPrompt(attachment, index)).join('\n\n'),
+    attachments
+      .map((attachment, index) => formatAttachmentForPrompt(attachment, index, imageVisionEnabled, imageVisionSupported))
+      .join('\n\n'),
     '</client_attachment_manifest>',
   ].join('\n');
 }
@@ -571,6 +596,34 @@ function toConversationAttachmentMeta(attachment: ComposerAttachment): Conversat
     truncated: attachment.truncated,
     previewDataUrl: attachment.previewDataUrl,
   };
+}
+
+function buildVisionImageInputs(attachments: ComposerAttachment[]): AgentImageInput[] {
+  return attachments
+    .filter((attachment) => attachment.kind === 'image' && Boolean(attachment.sourcePath))
+    .map((attachment) => ({
+      type: 'image_file',
+      path: attachment.sourcePath as string,
+      mimeType: attachment.type || undefined,
+      name: attachment.name,
+    }));
+}
+
+function getAttachmentVisionLabel(
+  attachment: ComposerAttachment,
+  imageVisionEnabled: boolean,
+  imageVisionSupported: boolean,
+): string | null {
+  if (attachment.kind !== 'image') {
+    return null;
+  }
+  if (!attachment.sourcePath) {
+    return '无路径';
+  }
+  if (!imageVisionSupported) {
+    return '不支持视觉';
+  }
+  return imageVisionEnabled ? '视觉' : '仅路径';
 }
 
 function createCapabilityId(): string {
@@ -1546,6 +1599,7 @@ function App(): ReactElement {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [openAppMenu, setOpenAppMenu] = useState<AppMenuName | null>(null);
   const [attachmentsByConversationId, setAttachmentsByConversationId] = useState<Record<string, ComposerAttachment[]>>({});
+  const [visionEnabledByConversationId, setVisionEnabledByConversationId] = useState<Record<string, boolean>>({});
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const knowledgeFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -3275,7 +3329,13 @@ function App(): ReactElement {
       return;
     }
     const attachmentsToSend = composerAttachments;
-    const outboundMessage = buildMessageWithAttachments(message, attachmentsToSend, activeWorkspace.path);
+    const outboundMessage = buildMessageWithAttachments(
+      message,
+      attachmentsToSend,
+      activeWorkspace.path,
+      imageVisionEnabled,
+      imageVisionSupported,
+    );
     const transcriptMessage = buildTranscriptMessageWithAttachments(message, attachmentsToSend);
     const transcriptAttachments = attachmentsToSend.map((attachment) => toConversationAttachmentMeta(attachment));
     let messageSession = session;
@@ -3322,7 +3382,11 @@ function App(): ReactElement {
     setStatusText('正在通过适配器发送消息');
 
     try {
-      const result = await window.windowsClient.sendAgentUserMessage(messageSession.id, outboundMessage);
+      const result = await window.windowsClient.sendAgentUserMessage(
+        messageSession.id,
+        outboundMessage,
+        canSendVisionImages ? visionImageInputs : undefined,
+      );
       const progressEvents = result.progressEvents ?? assistantItem.progressEvents ?? [];
       const processingEndedAt = result.endedAt ?? result.createdAt;
       const processingDurationMs =
@@ -3431,6 +3495,19 @@ function App(): ReactElement {
       !selectedConversation.archivedAt,
   );
   const selectedAgentModel = draftConfig?.model.models.find((model) => model.id === selectedAgent?.defaultModelId);
+  const imageAttachmentCount = composerAttachments.filter((attachment) => attachment.kind === 'image').length;
+  const visionImageInputs = buildVisionImageInputs(composerAttachments);
+  const imageVisionSupported = Boolean(selectedAgentModel?.input.includes('image'));
+  const imageVisionEnabled = visionEnabledByConversationId[selectedConversation.id] ?? true;
+  const canSendVisionImages = imageVisionEnabled && imageVisionSupported && visionImageInputs.length > 0;
+  const visionToggleDisabled = !imageVisionSupported || visionImageInputs.length === 0;
+  const visionStatusText = !imageVisionSupported
+    ? '当前模型不支持视觉'
+    : visionImageInputs.length === 0
+      ? '图片无本地路径'
+      : imageVisionEnabled
+        ? `${visionImageInputs.length} 张图片将发送给模型`
+        : `${imageAttachmentCount} 张图片仅保留路径`;
   const selectedAgentTaskTemplates = selectedAgent?.taskTemplates.filter((template) => template.enabled) ?? [];
   const runtimeContextPreview = session?.contextPreview;
   const runtimeTools = runtimeContextPreview?.tools ?? [];
@@ -4001,6 +4078,11 @@ function App(): ReactElement {
                           <FileText size={14} />
                           <span>{attachment.name}</span>
                           <small>{formatBytes(attachment.size)}</small>
+                          {getAttachmentVisionLabel(attachment, imageVisionEnabled, imageVisionSupported) && (
+                            <small className="composer-attachment-status">
+                              {getAttachmentVisionLabel(attachment, imageVisionEnabled, imageVisionSupported)}
+                            </small>
+                          )}
                           <button
                             type="button"
                             onClick={() => removeComposerAttachment(attachment.id)}
@@ -4024,6 +4106,31 @@ function App(): ReactElement {
                       >
                         <Plus size={18} />
                       </button>
+                      {imageAttachmentCount > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            className={`composer-vision-toggle ${
+                              imageVisionEnabled && !visionToggleDisabled ? 'enabled' : ''
+                            }`}
+                            disabled={visionToggleDisabled}
+                            onClick={() =>
+                              setVisionEnabledByConversationId((current) => ({
+                                ...current,
+                                [selectedConversation.id]: !(current[selectedConversation.id] ?? true),
+                              }))
+                            }
+                            aria-pressed={imageVisionEnabled && !visionToggleDisabled}
+                            title={visionStatusText}
+                          >
+                            <span className="composer-vision-switch" aria-hidden="true">
+                              <span />
+                            </span>
+                            <span>{imageVisionEnabled ? '开启视觉' : '关闭视觉'}</span>
+                          </button>
+                          <small className="composer-vision-hint">{visionStatusText}</small>
+                        </>
+                      )}
                       {selectedAgentTaskTemplates.length > 0 && (
                         <select
                           className="task-template-select"

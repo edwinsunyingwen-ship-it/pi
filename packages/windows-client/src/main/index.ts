@@ -6,7 +6,7 @@ import { IPC_CHANNELS } from "../shared/ipc";
 import type {
 	AgentConfig,
 	AgentCoreConfig,
-	AgentImageContent,
+	AgentImageInput,
 	AppEnvironment,
 	AuditLogQuery,
 	CapabilityConfig,
@@ -191,7 +191,7 @@ function registerIpcHandlers(): void {
 	);
 	ipcMain.handle(
 		IPC_CHANNELS.agentSendUserMessage,
-		(event, sessionId: string, message: string, images?: AgentImageContent[]) =>
+		(event, sessionId: string, message: string, images?: AgentImageInput[]) =>
 			agentService.sendUserMessage(sessionId, message, images, (progressEvent) => {
 				event.sender.send(IPC_CHANNELS.agentProgress, progressEvent);
 			}),

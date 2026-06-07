@@ -1,7 +1,7 @@
 import type {
 	AgentCapabilityCallLog,
 	AgentConfig,
-	AgentImageContent,
+	AgentImageInput,
 	AgentMessageResult,
 	AgentModelInteractionLog,
 	AgentProgressEvent,
@@ -89,7 +89,7 @@ export class AgentService {
 	async sendUserMessage(
 		sessionId: string,
 		message: string,
-		images?: AgentImageContent[],
+		images?: AgentImageInput[],
 		onProgress?: (event: AgentProgressEvent) => void,
 	): Promise<AgentMessageResult> {
 		await this.writeAudit({

@@ -7,7 +7,7 @@ import { StringDecoder } from "node:string_decoder";
 import { app } from "electron";
 import type {
 	AgentCapabilityCallLog,
-	AgentImageContent,
+	AgentImageInput,
 	AgentMessageResult,
 	AgentModelContextPreview,
 	AgentModelInteractionLog,
@@ -94,7 +94,7 @@ export interface AgentAdapter {
 	sendUserMessage(
 		sessionId: string,
 		message: string,
-		images?: AgentImageContent[],
+		images?: AgentImageInput[],
 		onProgress?: (event: AgentProgressEvent) => void,
 	): Promise<AgentMessageResult>;
 	stopSession(sessionId: string): Promise<AgentSession>;
@@ -187,7 +187,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 	async sendUserMessage(
 		sessionId: string,
 		message: string,
-		images?: AgentImageContent[],
+		images?: AgentImageInput[],
 		onProgress?: (event: AgentProgressEvent) => void,
 	): Promise<AgentMessageResult> {
 		const state = this.sessions.get(sessionId);
