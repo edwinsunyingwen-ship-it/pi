@@ -40,3 +40,6 @@ plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
+.electron-cache/
+.electron-builder-cache/
+packages/windows-client/release/
