@@ -2921,7 +2921,7 @@ option:disabled {
   display: grid;
   flex: 1 1 auto;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) 54px;
   min-height: 0;
   position: relative;
 }
@@ -2961,7 +2961,7 @@ option:disabled {
     background 0.16s ease,
     box-shadow 0.16s ease,
     width 0.16s ease;
-  width: 36px;
+  width: 44px;
   z-index: 4;
 }
 
@@ -3014,6 +3014,23 @@ option:disabled {
   overflow-y: auto;
   overflow-x: visible;
   padding-right: 1px;
+  scrollbar-width: none;
+}
+
+.conversation-turn-list::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+
+.conversation-turn-rail:hover .conversation-turn-list,
+.conversation-turn-rail:focus-within .conversation-turn-list {
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.conversation-turn-rail:hover .conversation-turn-list::-webkit-scrollbar,
+.conversation-turn-rail:focus-within .conversation-turn-list::-webkit-scrollbar {
+  width: 6px;
 }
 
 .conversation-turn-button {
@@ -3024,7 +3041,7 @@ option:disabled {
   color: var(--color-muted);
   display: grid;
   gap: 0;
-  grid-template-columns: 20px 0;
+  grid-template-columns: 28px 0;
   min-height: 24px;
   min-width: 0;
   overflow: hidden;
@@ -3035,7 +3052,7 @@ option:disabled {
 .conversation-turn-rail:hover .conversation-turn-button,
 .conversation-turn-rail:focus-within .conversation-turn-button {
   gap: 8px;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr);
   min-height: 36px;
   padding: 6px;
 }
@@ -3063,13 +3080,15 @@ option:disabled {
   height: 20px;
   justify-content: center;
   line-height: 1;
-  width: 20px;
+  min-width: 28px;
+  padding: 0 4px;
+  width: 28px;
 }
 
 .conversation-turn-rail:hover .conversation-turn-index,
 .conversation-turn-rail:focus-within .conversation-turn-index {
   height: 22px;
-  width: 22px;
+  width: 30px;
 }
 
 .conversation-turn-button.active .conversation-turn-index {
@@ -3109,7 +3128,7 @@ option:disabled {
   padding: 0;
   pointer-events: none;
   position: absolute;
-  right: 58px;
+  right: 66px;
   transform: translateY(8px);
   transition:
     opacity 0.16s ease,
@@ -4207,11 +4226,11 @@ option:disabled {
   }
 
   .app-shell > .dashboard-grid .conversation-main {
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr) 54px;
   }
 
   .app-shell > .dashboard-grid .scroll-to-bottom-button {
-    right: 64px;
+    right: 76px;
   }
 }
 
@@ -4687,7 +4706,7 @@ option:disabled {
 
 .app-shell > .dashboard-grid .conversation-main {
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1fr) 54px;
 }
 
 .app-shell > .dashboard-grid .conversation-turn-rail {
@@ -4708,7 +4727,7 @@ option:disabled {
 }
 
 .app-shell > .dashboard-grid .scroll-to-bottom-button {
-  right: 64px;
+  right: 76px;
 }
 
 .app-shell > .dashboard-grid .message-bubble {
@@ -5301,11 +5320,11 @@ option:disabled {
 
 @media (max-width: 1100px) {
   .app-shell > .dashboard-grid .conversation-main {
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr) 54px;
   }
 
   .app-shell > .dashboard-grid .scroll-to-bottom-button {
-    right: 64px;
+    right: 76px;
   }
 }
 
