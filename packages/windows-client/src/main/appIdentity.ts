@@ -37,7 +37,7 @@ export function getStaixUpdateFeedUrl(): string {
 
 function migrateLegacyUserDataIfNeeded(targetDir: string): void {
 	const sourceDir = findLegacyUserDataSource(targetDir);
-	if (!sourceDir || existsSync(join(targetDir, MIGRATION_MARKER_FILE))) {
+	if (!sourceDir) {
 		return;
 	}
 
@@ -49,7 +49,7 @@ function migrateLegacyUserDataIfNeeded(targetDir: string): void {
 	if (copyConfigIfBetter(sourceDir, targetDir, backupStamp)) {
 		filesCopied.push("config.json");
 	}
-	if (copyConversationsIfBetter(sourceDir, targetDir, backupStamp)) {
+	if (mergeConversationsIfBetter(sourceDir, targetDir, backupStamp)) {
 		filesCopied.push("conversations.json");
 	}
 	if (copyWorkspaceIfBetter(sourceDir, targetDir, backupStamp)) {
@@ -126,7 +126,7 @@ function copyConfigIfBetter(sourceDir: string, targetDir: string, backupStamp: s
 	return false;
 }
 
-function copyConversationsIfBetter(sourceDir: string, targetDir: string, backupStamp: string): boolean {
+function mergeConversationsIfBetter(sourceDir: string, targetDir: string, backupStamp: string): boolean {
 	const sourcePath = join(sourceDir, "conversations.json");
 	const targetPath = join(targetDir, "conversations.json");
 	if (!existsSync(sourcePath)) {
@@ -136,10 +136,17 @@ function copyConversationsIfBetter(sourceDir: string, targetDir: string, backupS
 		copyFileWithBackup(sourcePath, targetPath, backupStamp);
 		return true;
 	}
-	const sourceCount = countStoredConversations(sourcePath);
-	const targetCount = countStoredConversations(targetPath);
-	if (sourceCount > 0 && targetCount === 0) {
-		copyFileWithBackup(sourcePath, targetPath, backupStamp);
+	const sourceStore = readJsonRecord(sourcePath);
+	const targetStore = readJsonRecord(targetPath);
+	if (!sourceStore || !targetStore) {
+		return false;
+	}
+	const mergedStore = mergeConversationStores(sourceStore, targetStore);
+	if (
+		countStoredConversationsInStore(mergedStore) > countStoredConversationsInStore(targetStore) ||
+		countStoredMessagesInStore(mergedStore) > countStoredMessagesInStore(targetStore)
+	) {
+		writeJsonWithBackup(mergedStore, targetPath, backupStamp);
 		return true;
 	}
 	return false;
@@ -172,6 +179,14 @@ function copyFileWithBackup(sourcePath: string, targetPath: string, backupStamp:
 	copyFileSync(sourcePath, targetPath);
 }
 
+function writeJsonWithBackup(value: Record<string, unknown>, targetPath: string, backupStamp: string): void {
+	mkdirSync(dirname(targetPath), { recursive: true });
+	if (existsSync(targetPath)) {
+		copyFileSync(targetPath, `${targetPath}.bak-${backupStamp}`);
+	}
+	writeFileSync(targetPath, JSON.stringify(value, null, 2), "utf8");
+}
+
 function copyDirectoryMissingFiles(sourceDir: string, targetDir: string): number {
 	if (!existsSync(sourceDir) || !safeStat(sourceDir)?.isDirectory()) {
 		return 0;
@@ -185,11 +200,17 @@ function copyDirectoryMissingFiles(sourceDir: string, targetDir: string): number
 			copied += copyDirectoryMissingFiles(sourcePath, targetPath);
 			continue;
 		}
-		if (!entry.isFile() || existsSync(targetPath)) {
+		if (!entry.isFile()) {
 			continue;
 		}
-		copyFileSync(sourcePath, targetPath);
-		copied += 1;
+		if (!existsSync(targetPath)) {
+			copyFileSync(sourcePath, targetPath);
+			copied += 1;
+			continue;
+		}
+		if (mergeJsonlFilesIfDifferent(sourcePath, targetPath)) {
+			copied += 1;
+		}
 	}
 	return copied;
 }
@@ -213,12 +234,132 @@ function readClientConfigProfile(path: string): ClientConfigProfile | null {
 	};
 }
 
-function countStoredConversations(path: string): number {
-	const store = readJsonRecord(path);
+function countStoredConversationsInStore(store: Record<string, unknown>): number {
 	const conversationsByAgentId = isRecord(store?.conversationsByAgentId) ? store.conversationsByAgentId : {};
 	return Object.values(conversationsByAgentId).reduce<number>((count, conversations) => {
 		return count + (Array.isArray(conversations) ? conversations.length : 0);
 	}, 0);
+}
+
+function countStoredMessagesInStore(store: Record<string, unknown>): number {
+	const conversationsByAgentId = isRecord(store.conversationsByAgentId) ? store.conversationsByAgentId : {};
+	return Object.values(conversationsByAgentId).reduce<number>((count, conversations) => {
+		if (!Array.isArray(conversations)) {
+			return count;
+		}
+		return (
+			count +
+			conversations.reduce<number>((messageCount, conversation) => {
+				if (!isRecord(conversation) || !Array.isArray(conversation.transcript)) {
+					return messageCount;
+				}
+				return messageCount + conversation.transcript.length;
+			}, 0)
+		);
+	}, 0);
+}
+
+function mergeConversationStores(
+	sourceStore: Record<string, unknown>,
+	targetStore: Record<string, unknown>,
+): Record<string, unknown> {
+	const sourceConversations = isRecord(sourceStore.conversationsByAgentId) ? sourceStore.conversationsByAgentId : {};
+	const targetConversations = isRecord(targetStore.conversationsByAgentId) ? targetStore.conversationsByAgentId : {};
+	const conversationsByAgentId: Record<string, unknown[]> = {};
+	const agentIds = new Set([...Object.keys(sourceConversations), ...Object.keys(targetConversations)]);
+	for (const agentId of agentIds) {
+		const byId = new Map<string, Record<string, unknown>>();
+		for (const conversation of readRecordArray(sourceConversations[agentId])) {
+			const id = asString(conversation.id);
+			if (id) {
+				byId.set(id, conversation);
+			}
+		}
+		for (const conversation of readRecordArray(targetConversations[agentId])) {
+			const id = asString(conversation.id);
+			if (!id) {
+				continue;
+			}
+			const existing = byId.get(id);
+			byId.set(id, chooseRicherConversation(existing, conversation));
+		}
+		const conversations = Array.from(byId.values()).sort(compareConversationRecords);
+		if (conversations.length > 0) {
+			conversationsByAgentId[agentId] = conversations;
+		}
+	}
+
+	return {
+		...targetStore,
+		conversationsByAgentId,
+		activeConversationIdsByAgentId: {
+			...(isRecord(sourceStore.activeConversationIdsByAgentId) ? sourceStore.activeConversationIdsByAgentId : {}),
+			...(isRecord(targetStore.activeConversationIdsByAgentId) ? targetStore.activeConversationIdsByAgentId : {}),
+		},
+		updatedAt:
+			maxIsoString(asString(sourceStore.updatedAt), asString(targetStore.updatedAt)) ?? new Date().toISOString(),
+	};
+}
+
+function chooseRicherConversation(
+	first: Record<string, unknown> | undefined,
+	second: Record<string, unknown>,
+): Record<string, unknown> {
+	if (!first) {
+		return second;
+	}
+	const firstTranscriptLength = Array.isArray(first.transcript) ? first.transcript.length : 0;
+	const secondTranscriptLength = Array.isArray(second.transcript) ? second.transcript.length : 0;
+	if (secondTranscriptLength > firstTranscriptLength) {
+		return second;
+	}
+	const firstUpdatedAt = asString(first.updatedAt) ?? "";
+	const secondUpdatedAt = asString(second.updatedAt) ?? "";
+	if (secondTranscriptLength === firstTranscriptLength && secondUpdatedAt > firstUpdatedAt) {
+		return second;
+	}
+	return first;
+}
+
+function compareConversationRecords(first: Record<string, unknown>, second: Record<string, unknown>): number {
+	const firstUpdatedAt = asString(first.updatedAt) ?? "";
+	const secondUpdatedAt = asString(second.updatedAt) ?? "";
+	return secondUpdatedAt.localeCompare(firstUpdatedAt);
+}
+
+function maxIsoString(first: string | null, second: string | null): string | null {
+	if (!first) {
+		return second;
+	}
+	if (!second) {
+		return first;
+	}
+	return first > second ? first : second;
+}
+
+function mergeJsonlFilesIfDifferent(sourcePath: string, targetPath: string): boolean {
+	const sourceText = readFileSync(sourcePath, "utf8").trimEnd();
+	const targetText = readFileSync(targetPath, "utf8").trimEnd();
+	if (!sourceText || sourceText === targetText) {
+		return false;
+	}
+	const sourceLines = sourceText.split(/\r?\n/).filter(Boolean);
+	const targetLines = targetText ? targetText.split(/\r?\n/).filter(Boolean) : [];
+	const seen = new Set(sourceLines);
+	const mergedLines = [...sourceLines];
+	for (const line of targetLines) {
+		if (seen.has(line)) {
+			continue;
+		}
+		seen.add(line);
+		mergedLines.push(line);
+	}
+	if (mergedLines.length === targetLines.length && mergedLines.every((line, index) => line === targetLines[index])) {
+		return false;
+	}
+	copyFileSync(targetPath, `${targetPath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+	writeFileSync(targetPath, `${mergedLines.join("\n")}\n`, "utf8");
+	return true;
 }
 
 function readJsonRecord(path: string): Record<string, unknown> | null {
