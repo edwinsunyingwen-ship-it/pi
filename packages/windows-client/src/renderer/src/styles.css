@@ -4876,6 +4876,7 @@ select:focus {
 
 .selection-list {
   align-content: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   max-height: none;
   overflow: visible;
 }
@@ -4884,14 +4885,43 @@ select:focus {
   background: #fff;
   border: 1px solid #e8edf2;
   border-radius: 8px;
+  cursor: pointer;
   min-height: 38px;
+  min-width: 0;
   padding: 8px 10px;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.selection-list .checkbox-row:hover {
+  background: #fbfcfd;
+  border-color: #d6e0e8;
+}
+
+.selection-list .checkbox-row:has(input:checked) {
+  background: #eef7f4;
+  border-color: #9fc8bb;
+  box-shadow: inset 3px 0 0 #1f4d45;
+}
+
+.selection-list .checkbox-row:has(input:disabled) {
+  background: #f8fafc;
+  border-color: #eef1f5;
+  color: #98a2b3;
+  cursor: not-allowed;
 }
 
 .selection-list .checkbox-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.selection-list > strong,
+.selection-list > .empty-state {
+  grid-column: 1 / -1;
 }
 
 .action-dialog-backdrop {
@@ -4973,6 +5003,10 @@ select:focus {
   }
 
   .app-shell > .dashboard-grid .workbench-shell.context-open .workbench-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-list {
     grid-template-columns: 1fr;
   }
 }
