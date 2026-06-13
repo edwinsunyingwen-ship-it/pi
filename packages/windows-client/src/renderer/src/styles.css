@@ -1672,6 +1672,14 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.audit-status-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+}
+
 .storage-summary {
   color: #5b5751;
   display: flex;
@@ -3785,6 +3793,7 @@ select:focus {
 }
 
 .app-shell > .dashboard-grid > .audit-panel > .subtle-text,
+.app-shell > .dashboard-grid > .audit-panel > .audit-status-row,
 .app-shell > .dashboard-grid > .audit-panel > .audit-filters,
 .app-shell > .dashboard-grid > .audit-panel > .audit-pagination,
 .app-shell > .dashboard-grid > .audit-panel > .panel-heading {

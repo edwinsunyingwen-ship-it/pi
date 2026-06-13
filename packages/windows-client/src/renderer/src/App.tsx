@@ -2357,8 +2357,37 @@ function App(): ReactElement {
           ...auditQuery,
           startTime: createDefaultAuditQuery().startTime,
           endTime: createDefaultAuditQuery().endTime,
-        };
+    };
     await loadAuditLogs({ ...movingQuery, offset: 0 });
+  }
+
+  async function openAuditLogsFolder(): Promise<void> {
+    if (!auditPath) {
+      setStatusText('暂无可打开的日志文件夹');
+      return;
+    }
+    try {
+      await window.windowsClient.openLocalPath(auditPath);
+      setStatusText('已打开日志文件夹');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusText(`打开日志文件夹失败：${message}`);
+    }
+  }
+
+  async function revealAuditEntryLogFile(entry: AuditLogEntry): Promise<void> {
+    const logFilePath = getAuditEntryLogFilePath(auditPath, entry);
+    if (!logFilePath) {
+      setStatusText('暂无可打开的日志文件');
+      return;
+    }
+    try {
+      await window.windowsClient.showLocalPathInFolder(logFilePath);
+      setStatusText('已在文件夹中显示日志文件');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusText(`显示日志文件失败：${message}`);
+    }
   }
 
   async function applyAuditFilters(): Promise<void> {
@@ -5108,12 +5137,20 @@ function App(): ReactElement {
                 </button>
               </div>
             </div>
-            <p className="subtle-text">
-              {auditPath ? `日志文件：${auditPath}` : '今天还没有操作日志。'}
-              {auditRefreshedAt
-                ? ` 最新记录在上，刷新时间：${new Date(auditRefreshedAt).toLocaleTimeString('zh-CN')}`
-                : ''}
-            </p>
+            <div className="audit-status-row subtle-text">
+              <span>
+                最新记录在上
+                {auditRefreshedAt
+                  ? `，刷新时间：${new Date(auditRefreshedAt).toLocaleTimeString('zh-CN')}`
+                  : ''}
+              </span>
+              {auditPath && (
+                <button type="button" className="quiet-button compact-button" onClick={openAuditLogsFolder}>
+                  <FolderOpen size={16} />
+                  <span>打开日志文件夹</span>
+                </button>
+              )}
+            </div>
             <div className="audit-filters">
               <label>
                 <span>操作类型</span>
@@ -5318,9 +5355,18 @@ function App(): ReactElement {
             </div>
             <pre className="audit-detail-content">{getAuditFullContent(expandedAuditEntry)}</pre>
             {getAuditEntryLogFilePath(auditPath, expandedAuditEntry) && (
-              <p className="audit-detail-path">
-                完整日志文件：{getAuditEntryLogFilePath(auditPath, expandedAuditEntry)}
-              </p>
+              <div className="audit-detail-path">
+                <button
+                  type="button"
+                  className="quiet-button compact-button"
+                  onClick={() => {
+                    void revealAuditEntryLogFile(expandedAuditEntry);
+                  }}
+                >
+                  <FolderOpen size={16} />
+                  <span>在文件夹中显示日志文件</span>
+                </button>
+              </div>
             )}
           </section>
         </div>

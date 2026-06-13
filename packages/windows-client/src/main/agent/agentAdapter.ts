@@ -334,9 +334,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 		const sourceCli = join(projectRoot, "packages", "coding-agent", "src", "cli.ts");
 		const builtCli = join(projectRoot, "packages", "coding-agent", "dist", "cli.js");
 		const agentDir = this.getAgentDir(options, sessionId);
+		const sessionDir = join(agentDir, "sessions");
 		await this.writeModelsJson(options.model, agentDir);
 
-		const args = ["--mode", "rpc", "--no-session"];
+		const args = ["--mode", "rpc", "--session-dir", sessionDir];
 		const appendSystemPromptPath = await this.writeAppendSystemPrompt(options.appendSystemPrompt, agentDir);
 		if (appendSystemPromptPath) {
 			args.push("--append-system-prompt", appendSystemPromptPath);
@@ -376,7 +377,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 				...process.env,
 				...(isDevelopment ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
 				PI_CODING_AGENT_DIR: agentDir,
-				PI_CODING_AGENT_SESSION_DIR: join(agentDir, "sessions"),
+				PI_CODING_AGENT_SESSION_DIR: sessionDir,
 			},
 			stdio: "pipe",
 			windowsHide: true,
