@@ -26,6 +26,17 @@ const api: WindowsClientApi = {
 		ipcRenderer.invoke(IPC_CHANNELS.workspaceReadFile, relativePath, workspacePath),
 	openLocalPath: (path) => ipcRenderer.invoke(IPC_CHANNELS.localPathOpen, path),
 	showLocalPathInFolder: (path) => ipcRenderer.invoke(IPC_CHANNELS.localPathShowInFolder, path),
+	getUpdateState: () => ipcRenderer.invoke(IPC_CHANNELS.updateGetState),
+	checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.updateCheck),
+	downloadUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.updateDownload),
+	installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.updateInstall),
+	onUpdateStatus: (handler) => {
+		const listener = (_event: Electron.IpcRendererEvent, updateState: Parameters<typeof handler>[0]) => {
+			handler(updateState);
+		};
+		ipcRenderer.on(IPC_CHANNELS.updateStatus, listener);
+		return () => ipcRenderer.off(IPC_CHANNELS.updateStatus, listener);
+	},
 	startAgentSession: (agentId, workspacePath) =>
 		ipcRenderer.invoke(IPC_CHANNELS.agentStartSession, agentId, workspacePath),
 	stopAgentSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.agentStopSession, sessionId),

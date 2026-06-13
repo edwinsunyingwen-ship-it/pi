@@ -233,6 +233,27 @@ export interface LocalPathOpenResult {
 	path: string;
 }
 
+export type UpdateStatus =
+	| "idle"
+	| "checking"
+	| "available"
+	| "not-available"
+	| "downloading"
+	| "downloaded"
+	| "error"
+	| "unsupported";
+
+export interface UpdateState {
+	status: UpdateStatus;
+	currentVersion: string;
+	updateVersion: string | null;
+	message: string;
+	feedUrl: string;
+	progressPercent: number | null;
+	checkedAt: string | null;
+	downloadedAt: string | null;
+}
+
 export type AgentCoreMode = "embedded-rpc" | "external-rpc";
 
 export type ModelAuthType = "env" | "oauth" | "none";
@@ -468,6 +489,11 @@ export interface WindowsClientApi {
 	readWorkspaceFile: (relativePath: string, workspacePath?: string | null) => Promise<WorkspaceFileReadResult>;
 	openLocalPath: (path: string) => Promise<LocalPathOpenResult>;
 	showLocalPathInFolder: (path: string) => Promise<LocalPathOpenResult>;
+	getUpdateState: () => Promise<UpdateState>;
+	checkForUpdates: () => Promise<UpdateState>;
+	downloadUpdate: () => Promise<UpdateState>;
+	installUpdate: () => Promise<UpdateState>;
+	onUpdateStatus: (handler: (state: UpdateState) => void) => () => void;
 	startAgentSession: (agentId?: string, workspacePath?: string | null) => Promise<AgentSession>;
 	stopAgentSession: (sessionId: string) => Promise<AgentSession>;
 	getAgentSessionState: (sessionId: string) => Promise<AgentSession | null>;

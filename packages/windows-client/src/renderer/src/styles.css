@@ -1172,6 +1172,20 @@ dd {
   gap: 10px;
 }
 
+.update-status-text {
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  color: #344054;
+  margin: 14px 0 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
+.update-action-row {
+  margin-top: 12px;
+}
+
 .mono {
   background: #f0eee9;
   border-radius: 6px;

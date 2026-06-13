@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ['electron-updater'] })],
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),

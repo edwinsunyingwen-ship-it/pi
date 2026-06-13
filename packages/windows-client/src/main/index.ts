@@ -16,13 +16,17 @@ import type {
 	ModelProfileConfig,
 } from "../shared/types";
 import { RpcAgentAdapter } from "./agent/agentAdapter";
+import { configureStaixAppIdentity } from "./appIdentity";
 import { AgentService } from "./services/agentService";
 import { AuditLogger } from "./services/auditLogger";
 import { BrowserToolService } from "./services/browserToolService";
 import { ConfigService } from "./services/configService";
 import { ConversationStoreService } from "./services/conversationStoreService";
+import { UpdateService } from "./services/updateService";
 import { WorkspaceFileService } from "./services/workspaceFileService";
 import { WorkspaceService } from "./services/workspaceService";
+
+configureStaixAppIdentity();
 
 const auditLogger = new AuditLogger();
 const configService = new ConfigService(auditLogger);
@@ -30,6 +34,7 @@ const workspaceService = new WorkspaceService(auditLogger);
 const workspaceFileService = new WorkspaceFileService(workspaceService, auditLogger);
 const browserToolService = new BrowserToolService(auditLogger);
 const conversationStoreService = new ConversationStoreService();
+const updateService = new UpdateService();
 const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
 const mainDir = dirname(fileURLToPath(import.meta.url));
@@ -92,7 +97,7 @@ function createWindow(): void {
 		height: 760,
 		minWidth: 980,
 		minHeight: 640,
-		title: "石斧智能体客户端",
+		title: "Staix",
 		icon: appIconPath,
 		autoHideMenuBar: true,
 		backgroundColor: "#f6f5f2",
@@ -180,6 +185,10 @@ function registerIpcHandlers(): void {
 	);
 	ipcMain.handle(IPC_CHANNELS.localPathOpen, (_event, path: string) => openLocalPath(path));
 	ipcMain.handle(IPC_CHANNELS.localPathShowInFolder, (_event, path: string) => showLocalPathInFolder(path));
+	ipcMain.handle(IPC_CHANNELS.updateGetState, () => updateService.getState());
+	ipcMain.handle(IPC_CHANNELS.updateCheck, () => updateService.checkForUpdates());
+	ipcMain.handle(IPC_CHANNELS.updateDownload, () => updateService.downloadUpdate());
+	ipcMain.handle(IPC_CHANNELS.updateInstall, () => updateService.installUpdate());
 	ipcMain.handle(IPC_CHANNELS.auditListLogs, (_event, query?: AuditLogQuery) => auditLogger.listRecent(query));
 	ipcMain.handle(IPC_CHANNELS.conversationStoreGet, () => conversationStoreService.getStore());
 	ipcMain.handle(IPC_CHANNELS.conversationStoreSave, (_event, store) => conversationStoreService.saveStore(store));
@@ -204,6 +213,7 @@ function registerIpcHandlers(): void {
 app.whenReady().then(() => {
 	registerIpcHandlers();
 	createWindow();
+	updateService.scheduleStartupCheck();
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {

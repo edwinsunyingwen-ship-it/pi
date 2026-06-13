@@ -53,6 +53,7 @@ import type {
   ModelProfileConfig,
   ModelSetupMode,
   StoredAgentConversation,
+  UpdateState,
   WorkspaceFileInfo,
   WorkspaceState,
 } from '../../shared/types';
@@ -1581,6 +1582,7 @@ function hydrateModelAgentUsage(model: ModelProfileConfig, agents: AgentConfig[]
 
 function App(): ReactElement {
   const [environment, setEnvironment] = useState<AppEnvironment | null>(null);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [configState, setConfigState] = useState<ClientConfigState | null>(null);
   const [draftConfig, setDraftConfig] = useState<ClientConfig | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState>({ path: null, selectedAt: null });
@@ -1679,6 +1681,22 @@ function App(): ReactElement {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = window.windowsClient.onUpdateStatus((state) => {
+      setUpdateState(state);
+      if (state.status === 'available') {
+        setAgentNotice({ tone: 'info', text: `发现新版本 ${state.updateVersion}，可以在 Help 菜单下载更新。` });
+      }
+      if (state.status === 'downloaded') {
+        setAgentNotice({ tone: 'success', text: `版本 ${state.updateVersion} 已下载，重启应用后安装。` });
+      }
+      if (state.status === 'error') {
+        setAgentNotice({ tone: 'error', text: `更新失败：${state.message}` });
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
@@ -1703,6 +1721,16 @@ function App(): ReactElement {
     }
     return `${environment.platform} ${environment.arch} - Electron ${environment.electronVersion} - Node ${environment.nodeVersion}`;
   }, [environment]);
+
+  const updateLine = useMemo(() => {
+    if (!updateState) {
+      return '正在读取更新状态';
+    }
+    const versionLabel = updateState.updateVersion ? `目标版本 ${updateState.updateVersion}` : `当前版本 ${updateState.currentVersion}`;
+    const progressLabel =
+      updateState.progressPercent === null ? '' : `，下载进度 ${Math.round(updateState.progressPercent)}%`;
+    return `${versionLabel}，${updateState.message}${progressLabel}`;
+  }, [updateState]);
 
   const filteredModels = useMemo(() => {
     const models = draftConfig?.model.models ?? [];
@@ -2416,8 +2444,9 @@ function App(): ReactElement {
 
   async function refreshInitialState(): Promise<void> {
     const initialAuditQuery = createDefaultAuditQuery();
-    const [nextEnvironment, nextConfig, nextWorkspace, nextTools, nextAudit, nextConversationStore] = await Promise.all([
+    const [nextEnvironment, nextUpdateState, nextConfig, nextWorkspace, nextTools, nextAudit, nextConversationStore] = await Promise.all([
       window.windowsClient.getEnvironment(),
+      window.windowsClient.getUpdateState(),
       window.windowsClient.getClientConfig(),
       window.windowsClient.getWorkspace(),
       window.windowsClient.listAvailableTools(),
@@ -2448,6 +2477,7 @@ function App(): ReactElement {
     conversationStoreLoadedRef.current = true;
 
     setEnvironment(nextEnvironment);
+    setUpdateState(nextUpdateState);
     setConfigState(nextConfig);
     setDraftConfig(nextConfig.config);
     setSelectedAgentId((current) => {
@@ -2472,6 +2502,26 @@ function App(): ReactElement {
     if (nextWorkspace.path) {
       await refreshWorkspaceFiles();
     }
+  }
+
+  async function checkForUpdates(): Promise<void> {
+    setAgentNotice({ tone: 'info', text: '正在检查更新。' });
+    const nextState = await window.windowsClient.checkForUpdates();
+    setUpdateState(nextState);
+    setAgentNotice({ tone: nextState.status === 'error' ? 'error' : 'info', text: nextState.message });
+  }
+
+  async function downloadAvailableUpdate(): Promise<void> {
+    setAgentNotice({ tone: 'info', text: '正在下载更新。' });
+    const nextState = await window.windowsClient.downloadUpdate();
+    setUpdateState(nextState);
+    setAgentNotice({ tone: nextState.status === 'error' ? 'error' : 'info', text: nextState.message });
+  }
+
+  async function installDownloadedUpdate(): Promise<void> {
+    const nextState = await window.windowsClient.installUpdate();
+    setUpdateState(nextState);
+    setAgentNotice({ tone: nextState.status === 'error' ? 'error' : 'info', text: nextState.message });
   }
 
   async function loadAuditLogs(query: AuditLogQuery): Promise<void> {
@@ -3848,6 +3898,20 @@ function App(): ReactElement {
         label: environment ? `版本 ${environment.appVersion}` : '版本信息',
         onSelect: () => setAgentNotice({ tone: 'info', text: environmentLine }),
       },
+      {
+        label: '检查更新',
+        onSelect: checkForUpdates,
+      },
+      {
+        label: updateState?.status === 'downloading' ? '正在下载更新' : '下载更新',
+        disabled: updateState?.status !== 'available',
+        onSelect: downloadAvailableUpdate,
+      },
+      {
+        label: '重启并安装更新',
+        disabled: updateState?.status !== 'downloaded',
+        onSelect: installDownloadedUpdate,
+      },
     ],
   };
 
@@ -3863,9 +3927,9 @@ function App(): ReactElement {
         >
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
-        <div className="app-brand" aria-label="石斧智能体">
+        <div className="app-brand" aria-label="Staix">
           <img className="app-brand-mark" src={staixLogoUrl} alt="" aria-hidden="true" />
-          <span className="app-brand-name">石斧智能体</span>
+          <span className="app-brand-name">Staix</span>
         </div>
         <nav className="app-menu" aria-label="应用菜单">
           {(Object.keys(appMenus) as AppMenuName[]).map((menuName) => (
@@ -3996,7 +4060,7 @@ function App(): ReactElement {
       <header className="top-bar">
         <div>
           <p className="eyebrow">Windows 客户端</p>
-          <h1>石斧智能体工作台</h1>
+          <h1>Staix 工作台</h1>
         </div>
         <div className="status-pill">
           <CheckCircle2 size={16} />
@@ -4591,6 +4655,30 @@ function App(): ReactElement {
                   <dd>本地配置 + JSONL 操作日志</dd>
                 </div>
               </dl>
+              <p className="update-status-text">{updateLine}</p>
+              <div className="button-row update-action-row">
+                <button type="button" className="secondary-button" onClick={checkForUpdates}>
+                  <RefreshCw size={16} />
+                  <span>检查更新</span>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={updateState?.status !== 'available'}
+                  onClick={downloadAvailableUpdate}
+                >
+                  <ArrowDown size={16} />
+                  <span>{updateState?.status === 'downloading' ? '正在下载' : '下载更新'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={updateState?.status !== 'downloaded'}
+                  onClick={installDownloadedUpdate}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>重启安装</span>
+                </button>
+              </div>
             </article>
 
             <article className="panel wide-panel">
