@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import type { Token, Tokens } from 'marked';
 import {
   ArrowLeft,
+  ArrowDown,
   AlertTriangle,
   Bot,
   CheckCircle2,
@@ -106,6 +107,15 @@ interface SearchNavigationTarget {
   conversationId: string;
   messageIndex: number;
   query: string;
+}
+
+interface ConversationTurnNavigationItem {
+  turnNumber: number;
+  anchorMessageIndex: number;
+  latestMessageIndex: number;
+  createdAt: string;
+  preview: string;
+  hasAssistant: boolean;
 }
 
 const modelPageSize = 20;
@@ -1002,6 +1012,17 @@ function getMessageAnchorId(conversationId: string, messageIndex: number): strin
   return `${conversationId}:${messageIndex}`;
 }
 
+function getTranscriptPreviewText(item: TranscriptItem): string {
+  const text = item.text.replace(/\s+/g, ' ').trim();
+  if (text) {
+    return text.length > 64 ? `${text.slice(0, 64).trimEnd()}...` : text;
+  }
+  if (item.attachments?.length) {
+    return `${item.attachments.length} attachments`;
+  }
+  return item.role === 'assistant' ? 'Processing' : 'Empty message';
+}
+
 function renderHighlightedText(text: string, query: string): ReactElement {
   const segments = highlightSearchText(text, query);
 
@@ -1592,11 +1613,14 @@ function App(): ReactElement {
   const activeConversationIdsRef = useRef<Record<string, string>>({});
   const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const conversationListRef = useRef<HTMLDivElement | null>(null);
   const activeProgressTargetsRef = useRef<
     Record<string, { agentId: string; conversationId: string; messageCreatedAt: string }>
   >({});
   const [expandedProgressMessageIds, setExpandedProgressMessageIds] = useState<Set<string>>(() => new Set());
   const [progressNow, setProgressNow] = useState(() => Date.now());
+  const [activeTranscriptIndex, setActiveTranscriptIndex] = useState(0);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities' | 'archived'>(
     'models',
   );
@@ -1915,6 +1939,33 @@ function App(): ReactElement {
         (conversation) => !conversation.archivedAt,
       )
     : [];
+  const transcriptTurnNavigationItems = useMemo<ConversationTurnNavigationItem[]>(() => {
+    const items: ConversationTurnNavigationItem[] = [];
+    for (const [messageIndex, item] of transcript.entries()) {
+      if (item.role === 'user' || items.length === 0) {
+        items.push({
+          turnNumber: items.length + 1,
+          anchorMessageIndex: messageIndex,
+          latestMessageIndex: messageIndex,
+          createdAt: item.createdAt,
+          preview: getTranscriptPreviewText(item),
+          hasAssistant: item.role === 'assistant',
+        });
+        continue;
+      }
+
+      const currentTurn = items[items.length - 1];
+      currentTurn.latestMessageIndex = messageIndex;
+      currentTurn.hasAssistant = true;
+    }
+    return items;
+  }, [transcript]);
+  const activeTurnNumber =
+    transcriptTurnNavigationItems.find(
+      (item) => activeTranscriptIndex >= item.anchorMessageIndex && activeTranscriptIndex <= item.latestMessageIndex,
+    )?.turnNumber ??
+    transcriptTurnNavigationItems.at(-1)?.turnNumber ??
+    0;
 
   useEffect(() => {
     setSelectedFile(null);
@@ -1992,6 +2043,74 @@ function App(): ReactElement {
 
     return () => window.clearTimeout(timer);
   }, [activeSection, searchNavigationTarget, selectedConversation.id, transcript.length]);
+
+  useEffect(() => {
+    if (transcript.length === 0) {
+      setActiveTranscriptIndex(0);
+      setShowScrollToBottom(false);
+      return;
+    }
+    setActiveTranscriptIndex((index) => Math.min(index, transcript.length - 1));
+  }, [selectedConversation.id, transcript.length]);
+
+  useEffect(() => {
+    const root = conversationListRef.current;
+    if (!root || activeSection !== 'workbench' || transcript.length === 0) {
+      return;
+    }
+
+    const updateScrollState = (): void => {
+      const distanceToBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+      setShowScrollToBottom(distanceToBottom > 120);
+    };
+
+    const elementIndexes = new Map<Element, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const rootTop = root.getBoundingClientRect().top;
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .map((entry) => ({
+            entry,
+            index: elementIndexes.get(entry.target),
+          }))
+          .filter((item): item is { entry: IntersectionObserverEntry; index: number } => item.index !== undefined)
+          .sort(
+            (first, second) =>
+              Math.abs(first.entry.boundingClientRect.top - rootTop - 24) -
+              Math.abs(second.entry.boundingClientRect.top - rootTop - 24),
+          );
+
+        const nextActiveIndex = visibleEntries[0]?.index;
+        if (nextActiveIndex !== undefined) {
+          setActiveTranscriptIndex(nextActiveIndex);
+        }
+      },
+      {
+        root,
+        rootMargin: '-8% 0px -58% 0px',
+        threshold: [0, 0.15, 0.35, 0.6, 0.9],
+      },
+    );
+
+    transcript.forEach((_item, messageIndex) => {
+      const anchorId = getMessageAnchorId(selectedConversation.id, messageIndex);
+      const element = messageElementRefs.current[anchorId];
+      if (!element) {
+        return;
+      }
+      elementIndexes.set(element, messageIndex);
+      observer.observe(element);
+    });
+
+    updateScrollState();
+    root.addEventListener('scroll', updateScrollState, { passive: true });
+
+    return () => {
+      root.removeEventListener('scroll', updateScrollState);
+      observer.disconnect();
+    };
+  }, [activeSection, selectedConversation.id, transcript]);
 
   function commitAgentConversation(agentId: string, conversation: AgentConversationState): void {
     const nextConversation = {
@@ -2127,6 +2246,21 @@ function App(): ReactElement {
     persistConversationStore();
     setAgentNotice(null);
     setConversationRevision((revision) => revision + 1);
+  }
+
+  function scrollToTranscriptMessage(messageIndex: number): void {
+    const anchorId = getMessageAnchorId(selectedConversation.id, messageIndex);
+    const targetElement = messageElementRefs.current[anchorId];
+    targetElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setActiveTranscriptIndex(messageIndex);
+  }
+
+  function scrollToConversationBottom(): void {
+    const root = conversationListRef.current;
+    if (!root) {
+      return;
+    }
+    root.scrollTo({ top: root.scrollHeight, behavior: 'smooth' });
   }
 
   function openRenameConversation(conversation: AgentConversationState): void {
@@ -4131,7 +4265,8 @@ function App(): ReactElement {
 
                 {agentNotice && agentNotice.tone !== 'success' && <InlineNotice tone={agentNotice.tone} text={agentNotice.text} />}
 
-                <div className="conversation-list focused-conversation">
+                <div className="conversation-main">
+                <div className="conversation-list focused-conversation" ref={conversationListRef} aria-label="Conversation history">
                   {transcript.length === 0 ? (
                     <p className="empty-state">选择智能体后即可开始对话，系统会自动准备会话。</p>
                   ) : (
@@ -4185,6 +4320,44 @@ function App(): ReactElement {
                       );
                     })
                   )}
+                </div>
+                {transcriptTurnNavigationItems.length > 0 && (
+                  <aside className="conversation-turn-rail" aria-label="Conversation turns">
+                    <div className="conversation-turn-rail-head">
+                      <span>Turns</span>
+                      <strong>
+                        {activeTurnNumber}/{transcriptTurnNavigationItems.length}
+                      </strong>
+                    </div>
+                    <div className="conversation-turn-list">
+                      {transcriptTurnNavigationItems.map((item) => (
+                        <button
+                          type="button"
+                          className={`conversation-turn-button ${item.turnNumber === activeTurnNumber ? 'active' : ''}`}
+                          key={`${item.turnNumber}-${item.createdAt}`}
+                          onClick={() => scrollToTranscriptMessage(item.anchorMessageIndex)}
+                          aria-current={item.turnNumber === activeTurnNumber ? 'location' : undefined}
+                          title={`Turn ${item.turnNumber}: ${item.preview}`}
+                        >
+                          <span className="conversation-turn-index">{item.turnNumber}</span>
+                          <span className="conversation-turn-copy">
+                            <strong>{item.hasAssistant ? 'Q&A' : 'Prompt'}</strong>
+                            <small>{item.preview}</small>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </aside>
+                )}
+                <button
+                  type="button"
+                  className={`scroll-to-bottom-button ${showScrollToBottom ? 'visible' : ''}`}
+                  onClick={scrollToConversationBottom}
+                  aria-label="Scroll to bottom"
+                  title="Scroll to bottom"
+                >
+                  <ArrowDown size={18} />
+                </button>
                 </div>
 
                 <div className="composer workbench-composer">
