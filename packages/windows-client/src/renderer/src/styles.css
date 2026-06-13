@@ -9,11 +9,20 @@
   --color-text: #202124;
   --color-muted: #6d665d;
   --color-faint: #9a9185;
+  --color-label: #252a31;
+  --color-input-bg: #fff;
+  --color-input-border: #b8c0c8;
+  --color-input-border-hover: #8894a1;
+  --color-input-placeholder: #707984;
+  --color-disabled-bg: #eef1f4;
+  --color-disabled-border: #c5cdd6;
+  --color-disabled-text: #667085;
   --color-primary: #1f5a4f;
   --color-primary-dark: #17453e;
   --color-primary-soft: #e7f1eb;
   --color-action: #2f4f6f;
   --color-danger: #a24435;
+  --shadow-focus: 0 0 0 3px rgb(31 90 79 / 18%);
   --shadow-panel: 0 12px 34px rgb(40 35 28 / 6%);
   --radius: 10px;
   color: var(--color-text);
@@ -58,12 +67,14 @@ button:hover {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  background: #d9dee5;
+  color: #667085;
+  opacity: 1;
 }
 
 textarea {
-  background: #fffdfa;
-  border: 1px solid #d9d1c7;
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-input-border);
   border-radius: 8px;
   color: #202124;
   font: inherit;
@@ -76,8 +87,8 @@ textarea {
 
 input,
 select {
-  background: #fffdfa;
-  border: 1px solid #d9d1c7;
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-input-border);
   border-radius: 8px;
   color: #202124;
   font: inherit;
@@ -88,13 +99,15 @@ select {
 
 textarea:focus {
   border-color: #1f4d45;
-  outline: 3px solid #d8e8df;
+  box-shadow: var(--shadow-focus);
+  outline: 0;
 }
 
 input:focus,
 select:focus {
   border-color: #1f4d45;
-  outline: 3px solid #d8e8df;
+  box-shadow: var(--shadow-focus);
+  outline: 0;
 }
 
 .app-shell {
@@ -1885,9 +1898,9 @@ dd {
 .settings-grid label span,
 .model-form-layout label span,
 .settings-meta strong {
-  color: #6b6258;
-  font-size: 0.82rem;
-  font-weight: 800;
+  color: var(--color-label);
+  font-size: 0.84rem;
+  font-weight: 900;
 }
 
 .settings-grid label span.required-star,
@@ -1903,8 +1916,8 @@ dd {
 }
 
 .form-section-heading {
-  background: #f8f6f1;
-  border: 1px solid #ebe4db;
+  background: #fbfaf7;
+  border: 1px solid #d8ded7;
   border-radius: 8px;
   display: grid;
   gap: 4px;
@@ -1912,12 +1925,12 @@ dd {
 }
 
 .form-section-heading strong {
-  color: #1f4d45;
+  color: #174f45;
 }
 
 .form-section-heading span,
 .field-hint {
-  color: #756d63;
+  color: #5f6670;
   font-size: 0.78rem;
   line-height: 1.5;
 }
@@ -2131,7 +2144,7 @@ dd {
 
 .checkbox-row {
   align-items: center;
-  color: #33302c;
+  color: var(--color-label);
   display: flex;
   font-weight: 800;
   gap: 8px;
@@ -2140,9 +2153,20 @@ dd {
 
 .checkbox-row input {
   accent-color: #1f4d45;
+  cursor: pointer;
   flex: 0 0 auto;
   min-height: 18px;
   width: 18px;
+}
+
+.checkbox-row input:disabled {
+  accent-color: #98a2b3;
+  cursor: not-allowed;
+}
+
+.checkbox-row:has(input:disabled) {
+  color: var(--color-disabled-text);
+  cursor: not-allowed;
 }
 
 .model-form-layout label.checkbox-row,
@@ -2556,20 +2580,67 @@ button {
   padding: 0 13px;
 }
 
+button:disabled {
+  background: #d9dee5;
+  color: var(--color-disabled-text);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 textarea,
 input,
 select {
-  background: var(--color-surface);
-  border-color: var(--color-border);
+  background: var(--color-input-bg);
+  border-color: var(--color-input-border);
   border-radius: 8px;
   font-size: 0.92rem;
+  box-shadow: inset 0 1px 0 rgb(15 23 42 / 3%);
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease;
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--color-input-placeholder);
+  opacity: 1;
+}
+
+textarea:hover:not(:disabled),
+input:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: var(--color-input-border-hover);
 }
 
 textarea:focus,
 input:focus,
 select:focus {
   border-color: var(--color-primary);
-  outline: 3px solid rgb(31 90 79 / 13%);
+  box-shadow:
+    var(--shadow-focus),
+    inset 0 1px 0 rgb(15 23 42 / 3%);
+  outline: 0;
+}
+
+textarea:disabled,
+input:disabled,
+select:disabled {
+  background: var(--color-disabled-bg);
+  border-color: var(--color-disabled-border);
+  color: var(--color-disabled-text);
+  cursor: not-allowed;
+  -webkit-text-fill-color: var(--color-disabled-text);
+}
+
+select:disabled {
+  opacity: 1;
+}
+
+option:disabled {
+  color: var(--color-disabled-text);
+  background: var(--color-disabled-bg);
 }
 
 .app-shell {
@@ -4883,9 +4954,10 @@ select:focus {
 
 .selection-list .checkbox-row {
   background: #fff;
-  border: 1px solid #e8edf2;
+  border: 1px solid #cfd7df;
   border-radius: 8px;
   cursor: pointer;
+  color: #2f343b;
   min-height: 38px;
   min-width: 0;
   padding: 8px 10px;
@@ -4896,21 +4968,28 @@ select:focus {
 }
 
 .selection-list .checkbox-row:hover {
-  background: #fbfcfd;
-  border-color: #d6e0e8;
+  background: #f8fbff;
+  border-color: #98a6b3;
 }
 
 .selection-list .checkbox-row:has(input:checked) {
-  background: #eef7f4;
-  border-color: #9fc8bb;
-  box-shadow: inset 3px 0 0 #1f4d45;
+  background: #e5f2ed;
+  border-color: #2d7a68;
+  box-shadow:
+    inset 3px 0 0 #1f4d45,
+    0 0 0 1px rgb(31 90 79 / 12%);
+  color: #183b35;
 }
 
 .selection-list .checkbox-row:has(input:disabled) {
-  background: #f8fafc;
-  border-color: #eef1f5;
-  color: #98a2b3;
+  background: #eef1f4;
+  border-color: #d4dae1;
+  color: #667085;
   cursor: not-allowed;
+}
+
+.selection-list .checkbox-row:has(input:disabled) input {
+  opacity: 0.65;
 }
 
 .selection-list .checkbox-row span {
