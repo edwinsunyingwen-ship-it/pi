@@ -2920,8 +2920,8 @@ option:disabled {
 .conversation-main {
   display: grid;
   flex: 1 1 auto;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) 128px;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 42px;
   min-height: 0;
   position: relative;
 }
@@ -2946,54 +2946,98 @@ option:disabled {
 
 .conversation-turn-rail {
   align-self: stretch;
-  border-left: 1px solid var(--color-border);
+  background: rgb(255 255 255 / 82%);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgb(15 23 42 / 6%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  justify-self: end;
   min-height: 0;
-  padding: 8px 0 8px 8px;
+  overflow: visible;
+  padding: 7px 5px;
+  transition:
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    width 0.16s ease;
+  width: 36px;
+  z-index: 4;
+}
+
+.conversation-turn-rail:hover,
+.conversation-turn-rail:focus-within {
+  background: #fff;
+  box-shadow: 0 16px 36px rgb(15 23 42 / 14%);
+  width: 174px;
 }
 
 .conversation-turn-rail-head {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
+  gap: 6px;
   justify-content: space-between;
   min-height: 28px;
 }
 
 .conversation-turn-rail-head span {
   color: var(--color-muted);
+  display: none;
   font-size: 0.76rem;
   font-weight: 800;
 }
 
+.conversation-turn-rail:hover .conversation-turn-rail-head span,
+.conversation-turn-rail:focus-within .conversation-turn-rail-head span {
+  display: inline;
+}
+
 .conversation-turn-rail-head strong {
   color: var(--color-text);
+  font-size: 0.7rem;
+  text-align: center;
+  width: 100%;
+}
+
+.conversation-turn-rail:hover .conversation-turn-rail-head strong,
+.conversation-turn-rail:focus-within .conversation-turn-rail-head strong {
   font-size: 0.78rem;
+  text-align: right;
+  width: auto;
 }
 
 .conversation-turn-list {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  overflow-x: visible;
+  padding-right: 1px;
 }
 
 .conversation-turn-button {
-  align-items: start;
+  align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--color-muted);
   display: grid;
-  gap: 6px;
-  grid-template-columns: 20px minmax(0, 1fr);
-  min-height: 44px;
+  gap: 0;
+  grid-template-columns: 20px 0;
+  min-height: 24px;
   min-width: 0;
-  padding: 6px;
+  overflow: hidden;
+  padding: 2px 3px;
   text-align: left;
+}
+
+.conversation-turn-rail:hover .conversation-turn-button,
+.conversation-turn-rail:focus-within .conversation-turn-button {
+  gap: 8px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  min-height: 36px;
+  padding: 6px;
 }
 
 .conversation-turn-button:hover {
@@ -3022,34 +3066,32 @@ option:disabled {
   width: 20px;
 }
 
+.conversation-turn-rail:hover .conversation-turn-index,
+.conversation-turn-rail:focus-within .conversation-turn-index {
+  height: 22px;
+  width: 22px;
+}
+
 .conversation-turn-button.active .conversation-turn-index {
   background: #2f6f9f;
   color: #fff;
 }
 
 .conversation-turn-copy {
-  display: grid;
-  gap: 2px;
+  display: block;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.35;
   min-width: 0;
-}
-
-.conversation-turn-copy strong,
-.conversation-turn-copy small {
+  opacity: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversation-turn-copy strong {
-  color: inherit;
-  font-size: 0.74rem;
-  font-weight: 900;
-}
-
-.conversation-turn-copy small {
-  color: inherit;
-  font-size: 0.72rem;
-  opacity: 0.78;
+.conversation-turn-rail:hover .conversation-turn-copy,
+.conversation-turn-rail:focus-within .conversation-turn-copy {
+  opacity: 1;
 }
 
 .scroll-to-bottom-button {
@@ -3067,7 +3109,7 @@ option:disabled {
   padding: 0;
   pointer-events: none;
   position: absolute;
-  right: 148px;
+  right: 58px;
   transform: translateY(8px);
   transition:
     opacity 0.16s ease,
@@ -4165,15 +4207,11 @@ option:disabled {
   }
 
   .app-shell > .dashboard-grid .conversation-main {
-    grid-template-columns: minmax(0, 1fr) 92px;
-  }
-
-  .app-shell > .dashboard-grid .conversation-turn-copy small {
-    display: none;
+    grid-template-columns: minmax(0, 1fr) 44px;
   }
 
   .app-shell > .dashboard-grid .scroll-to-bottom-button {
-    right: 112px;
+    right: 64px;
   }
 }
 
@@ -4649,12 +4687,11 @@ option:disabled {
 
 .app-shell > .dashboard-grid .conversation-main {
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 132px;
+  grid-template-columns: minmax(0, 1fr) 44px;
 }
 
 .app-shell > .dashboard-grid .conversation-turn-rail {
-  border-left-color: #e4e7ec;
-  padding: 10px 0 12px 10px;
+  border-color: #e4e7ec;
 }
 
 .app-shell > .dashboard-grid .conversation-turn-rail-head span {
@@ -4671,7 +4708,7 @@ option:disabled {
 }
 
 .app-shell > .dashboard-grid .scroll-to-bottom-button {
-  right: 152px;
+  right: 64px;
 }
 
 .app-shell > .dashboard-grid .message-bubble {
@@ -5264,15 +5301,11 @@ option:disabled {
 
 @media (max-width: 1100px) {
   .app-shell > .dashboard-grid .conversation-main {
-    grid-template-columns: minmax(0, 1fr) 92px;
-  }
-
-  .app-shell > .dashboard-grid .conversation-turn-copy small {
-    display: none;
+    grid-template-columns: minmax(0, 1fr) 44px;
   }
 
   .app-shell > .dashboard-grid .scroll-to-bottom-button {
-    right: 112px;
+    right: 64px;
   }
 }
 

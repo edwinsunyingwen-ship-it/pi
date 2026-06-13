@@ -1614,6 +1614,7 @@ function App(): ReactElement {
   const manualStoppedConversationIdsRef = useRef<Set<string>>(new Set());
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const conversationListRef = useRef<HTMLDivElement | null>(null);
+  const transcriptNavigationLockUntilRef = useRef(0);
   const activeProgressTargetsRef = useRef<
     Record<string, { agentId: string; conversationId: string; messageCreatedAt: string }>
   >({});
@@ -2067,6 +2068,10 @@ function App(): ReactElement {
     const elementIndexes = new Map<Element, number>();
     const observer = new IntersectionObserver(
       (entries) => {
+        if (Date.now() < transcriptNavigationLockUntilRef.current) {
+          return;
+        }
+
         const rootTop = root.getBoundingClientRect().top;
         const visibleEntries = entries
           .filter((entry) => entry.isIntersecting)
@@ -2251,8 +2256,9 @@ function App(): ReactElement {
   function scrollToTranscriptMessage(messageIndex: number): void {
     const anchorId = getMessageAnchorId(selectedConversation.id, messageIndex);
     const targetElement = messageElementRefs.current[anchorId];
-    targetElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    transcriptNavigationLockUntilRef.current = Date.now() + 900;
     setActiveTranscriptIndex(messageIndex);
+    targetElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function scrollToConversationBottom(): void {
@@ -4341,8 +4347,7 @@ function App(): ReactElement {
                         >
                           <span className="conversation-turn-index">{item.turnNumber}</span>
                           <span className="conversation-turn-copy">
-                            <strong>{item.hasAssistant ? 'Q&A' : 'Prompt'}</strong>
-                            <small>{item.preview}</small>
+                            {item.preview}
                           </span>
                         </button>
                       ))}
