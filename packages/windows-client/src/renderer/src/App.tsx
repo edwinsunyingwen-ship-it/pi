@@ -2590,6 +2590,30 @@ function App(): ReactElement {
     return nextConfigState;
   }
 
+  async function syncCapabilityAgentBindings(capability: CapabilityConfig): Promise<ClientConfigState> {
+    if (!draftConfig) {
+      throw new Error('Missing draft config');
+    }
+    let nextConfigState = await window.windowsClient.saveCapabilityConfig(capability);
+
+    const targetAgentIds = new Set(capability.usedByAgentIds);
+    for (const agent of nextConfigState.config.agents) {
+      const shouldUseCapability = targetAgentIds.has(agent.id);
+      const hasCapability = agent.capabilityIds.includes(capability.id);
+      if (shouldUseCapability === hasCapability) {
+        continue;
+      }
+      const nextAgent: AgentConfig = {
+        ...agent,
+        capabilityIds: shouldUseCapability
+          ? Array.from(new Set([...agent.capabilityIds, capability.id]))
+          : agent.capabilityIds.filter((id) => id !== capability.id),
+      };
+      nextConfigState = await window.windowsClient.saveAgentConfig(nextAgent);
+    }
+    return nextConfigState;
+  }
+
   async function saveModelProfile(profile: ModelProfileConfig): Promise<void> {
     if (!draftConfig) {
       return;
@@ -2801,7 +2825,12 @@ function App(): ReactElement {
     }
 
     setStatusText(`正在保存业务能力：${capability.name}`);
-    const nextConfig = await window.windowsClient.saveCapabilityConfig(capability);
+    if (!capability.enabled && capability.usedByAgentIds.length > 0) {
+      setStatusText('已关联智能体的能力不能保存为未启用状态');
+      return;
+    }
+
+    const nextConfig = await syncCapabilityAgentBindings(capability);
     const nextTools = await window.windowsClient.listAvailableTools();
     setConfigState(nextConfig);
     setDraftConfig(nextConfig.config);
@@ -2982,6 +3011,20 @@ function App(): ReactElement {
     value: CapabilityConfig[K],
   ): void {
     setCapabilityEditor((capability) => (capability ? { ...capability, [key]: value } : capability));
+  }
+
+  function toggleCapabilityAgent(agentId: string, checked: boolean): void {
+    setCapabilityEditor((capability) => {
+      if (!capability) {
+        return capability;
+      }
+      return {
+        ...capability,
+        usedByAgentIds: checked
+          ? Array.from(new Set([...capability.usedByAgentIds, agentId]))
+          : capability.usedByAgentIds.filter((id) => id !== agentId),
+      };
+    });
   }
 
   function applyCapabilityType(type: CapabilityConfig['type']): void {
@@ -6587,6 +6630,24 @@ function App(): ReactElement {
                 />
                 <span>启用该能力</span>
               </label>
+
+              <div className="wide-field checklist-box selection-list">
+                <strong>可用智能体</strong>
+                {(draftConfig?.agents ?? []).length === 0 ? (
+                  <p className="empty-state">暂无智能体。</p>
+                ) : (
+                  (draftConfig?.agents ?? []).map((agent) => (
+                    <label className="checkbox-row" key={agent.id}>
+                      <input
+                        type="checkbox"
+                        checked={capabilityEditor.usedByAgentIds.includes(agent.id)}
+                        onChange={(event) => toggleCapabilityAgent(agent.id, event.target.checked)}
+                      />
+                      <span>{agent.name || '未命名智能体'}</span>
+                    </label>
+                  ))
+                )}
+              </div>
 
               <details className="wide-field advanced-capability-box">
                 <summary>高级配置（可选）</summary>
