@@ -60,6 +60,7 @@ export class AgentService {
 			cwd: effectiveWorkspacePath,
 			capabilities: enabledCapabilities,
 			variables: configState.config.variables,
+			contextCompaction: configState.config.contextCompaction,
 			appendSystemPrompt: this.buildAgentAppendSystemPrompt(
 				agent,
 				model,

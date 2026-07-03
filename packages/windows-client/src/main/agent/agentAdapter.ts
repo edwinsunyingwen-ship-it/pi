@@ -16,6 +16,7 @@ import type {
 	AgentToolInfo,
 	CapabilityConfig,
 	ClientVariableConfig,
+	ContextCompactionConfig,
 	ModelProfileConfig,
 } from "../../shared/types";
 
@@ -24,6 +25,7 @@ export interface AgentStartOptions {
 	cwd: string | null;
 	capabilities?: CapabilityConfig[];
 	variables?: ClientVariableConfig[];
+	contextCompaction?: ContextCompactionConfig;
 	appendSystemPrompt?: string;
 	isolated?: boolean;
 }
@@ -336,6 +338,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 		const agentDir = this.getAgentDir(options, sessionId);
 		const sessionDir = join(agentDir, "sessions");
 		await this.writeModelsJson(options.model, agentDir);
+		await this.writeSettingsJson(options.contextCompaction, agentDir);
 
 		const args = ["--mode", "rpc", "--session-dir", sessionDir];
 		const appendSystemPromptPath = await this.writeAppendSystemPrompt(options.appendSystemPrompt, agentDir);
@@ -452,6 +455,33 @@ export class RpcAgentAdapter implements AgentAdapter {
 		await writeFile(
 			modelsJsonPath,
 			JSON.stringify({ providers: { [model.provider]: providerConfig } }, null, 2),
+			"utf8",
+		);
+	}
+
+	private async writeSettingsJson(
+		contextCompaction: ContextCompactionConfig | undefined,
+		agentDir: string,
+	): Promise<void> {
+		if (!contextCompaction) {
+			return;
+		}
+
+		await mkdir(agentDir, { recursive: true });
+		const settingsJsonPath = join(agentDir, "settings.json");
+		await writeFile(
+			settingsJsonPath,
+			JSON.stringify(
+				{
+					compaction: {
+						enabled: contextCompaction.enabled,
+						reserveTokens: contextCompaction.reserveTokens,
+						keepRecentTokens: contextCompaction.keepRecentTokens,
+					},
+				},
+				null,
+				2,
+			),
 			"utf8",
 		);
 	}

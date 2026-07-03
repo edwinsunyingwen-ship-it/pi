@@ -11,6 +11,7 @@ import type {
 	AuditLogQuery,
 	CapabilityConfig,
 	ClientVariableConfig,
+	ContextCompactionConfig,
 	LocalPathOpenResult,
 	ModelConfig,
 	ModelProfileConfig,
@@ -147,6 +148,9 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.configGet, () => configService.getConfig());
 	ipcMain.handle(IPC_CHANNELS.configSaveAgentCore, (_event, agentCore: AgentCoreConfig) =>
 		configService.saveAgentCoreConfig(agentCore),
+	);
+	ipcMain.handle(IPC_CHANNELS.configSaveContextCompaction, (_event, contextCompaction: ContextCompactionConfig) =>
+		configService.saveContextCompactionConfig(contextCompaction),
 	);
 	ipcMain.handle(IPC_CHANNELS.configSaveVariables, (_event, variables: ClientVariableConfig[]) =>
 		configService.saveVariablesConfig(variables),

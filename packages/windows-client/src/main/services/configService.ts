@@ -9,6 +9,7 @@ import type {
 	ClientConfig,
 	ClientConfigState,
 	ClientVariableConfig,
+	ContextCompactionConfig,
 	ModelConfig,
 	ModelProfileConfig,
 } from "../../shared/types";
@@ -43,6 +44,18 @@ export class ConfigService {
 		});
 
 		await this.writeConfig(nextConfig, true, "save-agent-core-config", "更新智能体内核与 RPC 配置。");
+		return { configPath: this.configPath, config: nextConfig };
+	}
+
+	async saveContextCompactionConfig(contextCompaction: ContextCompactionConfig): Promise<ClientConfigState> {
+		const current = await this.getConfig();
+		const nextConfig = this.mergeWithDefaults({
+			...current.config,
+			contextCompaction,
+			updatedAt: new Date().toISOString(),
+		});
+
+		await this.writeConfig(nextConfig, true, "save-context-compaction-config", "更新上下文压缩配置。");
 		return { configPath: this.configPath, config: nextConfig };
 	}
 
@@ -222,6 +235,11 @@ export class ConfigService {
 				mode: "embedded-rpc",
 				rpcEndpoint: "local-subprocess",
 			},
+			contextCompaction: {
+				enabled: true,
+				reserveTokens: 16384,
+				keepRecentTokens: 20000,
+			},
 			variables: [],
 			model: {
 				defaultModelId: "openai-default",
@@ -359,6 +377,7 @@ export class ConfigService {
 				legacyConfig.rpcEndpoint,
 				defaultConfig.agentCore,
 			),
+			contextCompaction: this.normalizeContextCompaction(config.contextCompaction, defaultConfig.contextCompaction),
 			variables: this.normalizeVariables(config.variables),
 			model: this.applyModelUsage(model, agents),
 			capabilities: this.applyCapabilityUsage(capabilities, agents),
@@ -380,6 +399,17 @@ export class ConfigService {
 		return {
 			mode: agentCore?.mode ?? legacyMode ?? defaultAgentCore.mode,
 			rpcEndpoint: agentCore?.rpcEndpoint ?? legacyRpcEndpoint ?? defaultAgentCore.rpcEndpoint,
+		};
+	}
+
+	private normalizeContextCompaction(
+		contextCompaction: ContextCompactionConfig | undefined,
+		defaultContextCompaction: ContextCompactionConfig,
+	): ContextCompactionConfig {
+		return {
+			enabled: contextCompaction?.enabled ?? defaultContextCompaction.enabled,
+			reserveTokens: Number(contextCompaction?.reserveTokens ?? defaultContextCompaction.reserveTokens),
+			keepRecentTokens: Number(contextCompaction?.keepRecentTokens ?? defaultContextCompaction.keepRecentTokens),
 		};
 	}
 

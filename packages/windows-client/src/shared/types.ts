@@ -281,6 +281,12 @@ export interface AgentCoreConfig {
 	rpcEndpoint: string;
 }
 
+export interface ContextCompactionConfig {
+	enabled: boolean;
+	reserveTokens: number;
+	keepRecentTokens: number;
+}
+
 export interface ClientVariableConfig {
 	name: string;
 	value: string;
@@ -453,6 +459,7 @@ export interface AgentConfig {
 
 export interface ClientConfig {
 	agentCore: AgentCoreConfig;
+	contextCompaction: ContextCompactionConfig;
 	variables: ClientVariableConfig[];
 	model: ModelConfig;
 	capabilities: CapabilityConfig[];
@@ -470,6 +477,7 @@ export interface WindowsClientApi {
 	getEnvironment: () => Promise<AppEnvironment>;
 	getClientConfig: () => Promise<ClientConfigState>;
 	saveAgentCoreConfig: (agentCore: AgentCoreConfig) => Promise<ClientConfigState>;
+	saveContextCompactionConfig: (contextCompaction: ContextCompactionConfig) => Promise<ClientConfigState>;
 	saveVariablesConfig: (variables: ClientVariableConfig[]) => Promise<ClientConfigState>;
 	saveModelConfig: (model: ModelConfig) => Promise<ClientConfigState>;
 	deleteModelConfig: (id: string) => Promise<ClientConfigState>;

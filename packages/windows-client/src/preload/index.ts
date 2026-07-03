@@ -6,6 +6,8 @@ const api: WindowsClientApi = {
 	getEnvironment: () => ipcRenderer.invoke(IPC_CHANNELS.getEnvironment),
 	getClientConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configGet),
 	saveAgentCoreConfig: (agentCore) => ipcRenderer.invoke(IPC_CHANNELS.configSaveAgentCore, agentCore),
+	saveContextCompactionConfig: (contextCompaction) =>
+		ipcRenderer.invoke(IPC_CHANNELS.configSaveContextCompaction, contextCompaction),
 	saveVariablesConfig: (variables) => ipcRenderer.invoke(IPC_CHANNELS.configSaveVariables, variables),
 	saveModelConfig: (model) => ipcRenderer.invoke(IPC_CHANNELS.configSaveModel, model),
 	deleteModelConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteModel, id),

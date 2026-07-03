@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
 	getEnvironment: "app:get-environment",
 	configGet: "config:get",
 	configSaveAgentCore: "config:save-agent-core",
+	configSaveContextCompaction: "config:save-context-compaction",
 	configSaveVariables: "config:save-variables",
 	configSaveModel: "config:save-model",
 	configDeleteModel: "config:delete-model",

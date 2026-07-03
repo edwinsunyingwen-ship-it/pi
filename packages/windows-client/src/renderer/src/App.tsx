@@ -48,6 +48,7 @@ import type {
   CapabilityExecutionMode,
   ClientConfig,
   ClientConfigState,
+  ContextCompactionConfig,
   ConversationAttachmentMeta,
   ModelInputCapability,
   ModelProfileConfig,
@@ -124,6 +125,8 @@ const capabilityPageSize = 20;
 const agentPageSize = 20;
 const archivedConversationPageSize = 20;
 const auditPageSize = 100;
+const compactionReserveTokenOptions = [4096, 8192, 16384, 32768, 65536];
+const compactionKeepRecentTokenOptions = [10000, 20000, 40000, 80000];
 const maxConversationTitleLength = 60;
 const auditContentPreviewMaxLength = 120;
 const maxComposerAttachments = 20;
@@ -159,6 +162,7 @@ const textAttachmentExtensions = new Set([
 
 type AppMenuName = 'File' | 'Edit' | 'View' | 'Window' | 'Help';
 type AppSection = 'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs' | 'billing';
+type ConfigTab = 'agents' | 'models' | 'core' | 'capabilities' | 'archived' | 'context-compaction';
 
 interface AppMenuItem {
   label: string;
@@ -1624,9 +1628,7 @@ function App(): ReactElement {
   const [progressNow, setProgressNow] = useState(() => Date.now());
   const [activeTranscriptIndex, setActiveTranscriptIndex] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [activeConfigTab, setActiveConfigTab] = useState<'agents' | 'models' | 'core' | 'capabilities' | 'archived'>(
-    'models',
-  );
+  const [activeConfigTab, setActiveConfigTab] = useState<ConfigTab>('models');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const selectedAgentIdRef = useRef<string | null>(null);
@@ -2665,6 +2667,20 @@ function App(): ReactElement {
     await refreshAuditLogs();
   }
 
+  async function saveContextCompactionConfig(): Promise<void> {
+    if (!draftConfig) {
+      return;
+    }
+
+    setStatusText('正在保存上下文压缩配置');
+    const nextConfig = await window.windowsClient.saveContextCompactionConfig(draftConfig.contextCompaction);
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    setConfigNotice({ tone: 'success', text: '上下文压缩配置已保存。' });
+    setStatusText('上下文压缩配置已保存');
+    await refreshAuditLogs();
+  }
+
   async function saveAgentConfig(agent: AgentConfig): Promise<void> {
     if (!agent.name.trim()) {
       setConfigNotice({ tone: 'error', text: '智能体名称不能为空。' });
@@ -3068,6 +3084,23 @@ function App(): ReactElement {
   ): void {
     setDraftConfig((config) =>
       config ? { ...config, agentCore: { ...config.agentCore, [key]: value } } : config,
+    );
+  }
+
+  function updateContextCompaction<K extends keyof ContextCompactionConfig>(
+    key: K,
+    value: ContextCompactionConfig[K],
+  ): void {
+    setDraftConfig((config) =>
+      config
+        ? {
+            ...config,
+            contextCompaction: {
+              ...config.contextCompaction,
+              [key]: value,
+            },
+          }
+        : config,
     );
   }
 
@@ -4882,6 +4915,13 @@ function App(): ReactElement {
                 </button>
                 <button
                   type="button"
+                  className={activeConfigTab === 'context-compaction' ? 'active' : ''}
+                  onClick={() => setActiveConfigTab('context-compaction')}
+                >
+                  上下文压缩
+                </button>
+                <button
+                  type="button"
                   className={activeConfigTab === 'core' ? 'active' : ''}
                   onClick={() => setActiveConfigTab('core')}
                 >
@@ -4958,6 +4998,67 @@ function App(): ReactElement {
                   setPage: setAgentPage,
                   setPageInput: setAgentPageInput,
                 })}
+              </section>
+              )}
+
+              {activeConfigTab === 'context-compaction' && (
+              <section className="config-block list-page">
+                <div className="section-title-row">
+                  <div>
+                    <strong>上下文压缩</strong>
+                    <span>控制会话接近模型上下文上限时的自动压缩行为。</span>
+                  </div>
+                  <button type="button" onClick={saveContextCompactionConfig}>
+                    <Save size={16} />
+                    <span>保存压缩配置</span>
+                  </button>
+                </div>
+                <div className="settings-grid">
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={draftConfig.contextCompaction.enabled}
+                      onChange={(event) => updateContextCompaction('enabled', event.target.checked)}
+                    />
+                    <span>启用自动压缩</span>
+                  </label>
+                  <label>
+                    <span>剩余令牌阈值</span>
+                    <select
+                      value={String(draftConfig.contextCompaction.reserveTokens)}
+                      onChange={(event) => updateContextCompaction('reserveTokens', Number(event.target.value))}
+                    >
+                      {[
+                        ...new Set([
+                          draftConfig.contextCompaction.reserveTokens,
+                          ...compactionReserveTokenOptions,
+                        ]),
+                      ].map((tokens) => (
+                        <option key={tokens} value={tokens}>
+                          {tokens.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>保留最近令牌数</span>
+                    <select
+                      value={String(draftConfig.contextCompaction.keepRecentTokens)}
+                      onChange={(event) => updateContextCompaction('keepRecentTokens', Number(event.target.value))}
+                    >
+                      {[
+                        ...new Set([
+                          draftConfig.contextCompaction.keepRecentTokens,
+                          ...compactionKeepRecentTokenOptions,
+                        ]),
+                      ].map((tokens) => (
+                        <option key={tokens} value={tokens}>
+                          {tokens.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
               </section>
               )}
 
