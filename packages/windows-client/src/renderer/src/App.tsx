@@ -2861,6 +2861,7 @@ function App(): ReactElement {
     const normalizedProfile = {
       ...profile,
       displayName: profile.displayName.trim() || profile.modelId.trim(),
+      defaultThinkingLevel: profile.supportsReasoning ? profile.defaultThinkingLevel : 'off',
       enabled: profile.enabled && !shouldForceDisabled,
     };
     if (shouldForceDisabled) {
@@ -3134,6 +3135,18 @@ function App(): ReactElement {
     value: ModelProfileConfig[K],
   ): void {
     setModelEditor((model) => (model ? { ...model, [key]: value } : model));
+  }
+
+  function updateModelReasoningSupport(supportsReasoning: boolean): void {
+    setModelEditor((model) =>
+      model
+        ? {
+            ...model,
+            supportsReasoning,
+            defaultThinkingLevel: supportsReasoning ? model.defaultThinkingLevel : 'off',
+          }
+        : model,
+    );
   }
 
   function updateModelId(value: string): void {
@@ -6551,10 +6564,19 @@ function App(): ReactElement {
                 <strong>模型能力</strong>
                 <span>这些字段用于未来筛选模型、创建智能体、计算上下文和成本。</span>
               </div>
+              <label className="checkbox-row form-checkbox">
+                <input
+                  type="checkbox"
+                  checked={modelEditor.supportsReasoning}
+                  onChange={(event) => updateModelReasoningSupport(event.target.checked)}
+                />
+                <span>支持思考 / Reasoning</span>
+              </label>
               <label>
                 <span>默认 Thinking</span>
                 <select
                   value={modelEditor.defaultThinkingLevel}
+                  disabled={!modelEditor.supportsReasoning}
                   onChange={(event) =>
                     updateModelEditor(
                       'defaultThinkingLevel',
@@ -6608,14 +6630,6 @@ function App(): ReactElement {
                     <span>视觉</span>
                   </label>
                 </div>
-              </label>
-              <label className="checkbox-row form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={modelEditor.supportsReasoning}
-                  onChange={(event) => updateModelEditor('supportsReasoning', event.target.checked)}
-                />
-                <span>支持思考 / Reasoning</span>
               </label>
 
               <div className="wide-field checklist-box selection-list">
