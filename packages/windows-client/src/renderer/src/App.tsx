@@ -811,6 +811,45 @@ function createModelProfile(preset?: ProviderPreset): ModelProfileConfig {
   };
 }
 
+function appendCopySuffix(value: string, fallback: string): string {
+  const baseValue = value.trim() || fallback;
+  return `${baseValue}复制`;
+}
+
+function copyAgentConfig(agent: AgentConfig): AgentConfig {
+  return {
+    ...agent,
+    id: crypto.randomUUID(),
+    name: appendCopySuffix(agent.name, '未命名智能体'),
+    taskTemplates: agent.taskTemplates.map((template) => ({
+      ...template,
+      id: crypto.randomUUID(),
+    })),
+    knowledgeItems: agent.knowledgeItems.map((item) => ({
+      ...item,
+      id: crypto.randomUUID(),
+    })),
+  };
+}
+
+function copyModelProfile(profile: ModelProfileConfig): ModelProfileConfig {
+  const copiedModelId = appendCopySuffix(profile.modelId, profile.displayName || profile.id);
+  const copiedDisplayName =
+    profile.displayName.trim() || profile.modelId.trim()
+      ? appendCopySuffix(profile.displayName || profile.modelId, copiedModelId)
+      : copiedModelId;
+  return {
+    ...profile,
+    id: createModelId(),
+    modelId: copiedModelId,
+    displayName: copiedDisplayName,
+    enabled: false,
+    connectionStatus: 'untested',
+    lastTestedAt: null,
+    usedByAgentIds: [],
+  };
+}
+
 function findProviderPreset(provider: string): ProviderPreset | undefined {
   return providerPresets.find((preset) => preset.provider === provider);
 }
@@ -2736,6 +2775,10 @@ function App(): ReactElement {
     await refreshAuditLogs();
   }
 
+  async function duplicateAgentConfig(agent: AgentConfig): Promise<void> {
+    await saveAgentConfig(copyAgentConfig(agent));
+  }
+
   async function deleteAgentConfig(id: string): Promise<void> {
     const agent = draftConfig?.agents.find((item) => item.id === id);
     if (!agent) {
@@ -2881,6 +2924,22 @@ function App(): ReactElement {
       : `模型已保存：${normalizedProfile.displayName}`;
     setConfigNotice({ tone: shouldForceDisabled ? 'error' : 'success', text: saveMessage });
     setStatusText(saveMessage);
+    await refreshAuditLogs();
+  }
+
+  async function duplicateModelProfile(profile: ModelProfileConfig): Promise<void> {
+    if (!draftConfig) {
+      return;
+    }
+    const copiedProfile = copyModelProfile(hydrateModelAgentUsage(profile, draftConfig.agents));
+    const nextConfig = await window.windowsClient.saveModelConfig({
+      ...draftConfig.model,
+      models: [...draftConfig.model.models, copiedProfile],
+    });
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    setConfigNotice({ tone: 'success', text: `模型已复制：${copiedProfile.displayName}` });
+    setStatusText(`模型已复制：${copiedProfile.displayName}`);
     await refreshAuditLogs();
   }
 
@@ -5010,6 +5069,14 @@ function App(): ReactElement {
                             <button
                               type="button"
                               className="quiet-button compact-button"
+                              onClick={() => duplicateAgentConfig(agent)}
+                            >
+                              <Copy size={14} />
+                              <span>复制</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
                               onClick={() => saveAgentConfig({ ...agent, enabled: !agent.enabled })}
                             >
                               {agent.enabled ? '停用' : '启用'}
@@ -5343,6 +5410,14 @@ function App(): ReactElement {
                               }}
                             >
                               编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="quiet-button compact-button"
+                              onClick={() => duplicateModelProfile(model)}
+                            >
+                              <Copy size={14} />
+                              <span>复制</span>
                             </button>
                             <button
                               type="button"
