@@ -125,8 +125,11 @@ const capabilityPageSize = 20;
 const agentPageSize = 20;
 const archivedConversationPageSize = 20;
 const auditPageSize = 100;
-const compactionReserveTokenOptions = [4096, 8192, 16384, 32768, 65536];
-const compactionKeepRecentTokenOptions = [10000, 20000, 40000, 80000];
+const defaultContextCompactionConfig: ContextCompactionConfig = {
+  enabled: true,
+  reserveTokens: 16384,
+  keepRecentTokens: 20000,
+};
 const maxConversationTitleLength = 60;
 const auditContentPreviewMaxLength = 120;
 const maxComposerAttachments = 20;
@@ -3104,6 +3107,28 @@ function App(): ReactElement {
     );
   }
 
+  function updateContextCompactionInteger(
+    key: 'reserveTokens' | 'keepRecentTokens',
+    value: string,
+  ): void {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return;
+    }
+    updateContextCompaction(key, parsed);
+  }
+
+  function resetContextCompactionDefaults(): void {
+    setDraftConfig((config) =>
+      config
+        ? {
+            ...config,
+            contextCompaction: { ...defaultContextCompactionConfig },
+          }
+        : config,
+    );
+  }
+
   function updateModelEditor<K extends keyof ModelProfileConfig>(
     key: K,
     value: ModelProfileConfig[K],
@@ -5008,55 +5033,59 @@ function App(): ReactElement {
                     <strong>上下文压缩</strong>
                     <span>控制会话接近模型上下文上限时的自动压缩行为。</span>
                   </div>
-                  <button type="button" onClick={saveContextCompactionConfig}>
-                    <Save size={16} />
-                    <span>保存压缩配置</span>
-                  </button>
+                  <div className="button-row">
+                    <button type="button" className="quiet-button compact-button" onClick={resetContextCompactionDefaults}>
+                      恢复默认设置
+                    </button>
+                    <button type="button" onClick={saveContextCompactionConfig}>
+                      <Save size={16} />
+                      <span>保存压缩配置</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="settings-grid">
-                  <label className="checkbox-row">
+                  <label>
+                    <span>自动压缩状态</span>
+                    <div className="segmented-radio-group">
+                      <label>
+                        <input
+                          type="radio"
+                          name="context-compaction-enabled"
+                          checked={draftConfig.contextCompaction.enabled}
+                          onChange={() => updateContextCompaction('enabled', true)}
+                        />
+                        <span>启用</span>
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="context-compaction-enabled"
+                          checked={!draftConfig.contextCompaction.enabled}
+                          onChange={() => updateContextCompaction('enabled', false)}
+                        />
+                        <span>停用</span>
+                      </label>
+                    </div>
+                  </label>
+                  <label>
+                    <span>剩余令牌阈值 (reserveTokens)</span>
                     <input
-                      type="checkbox"
-                      checked={draftConfig.contextCompaction.enabled}
-                      onChange={(event) => updateContextCompaction('enabled', event.target.checked)}
-                    />
-                    <span>启用自动压缩</span>
-                  </label>
-                  <label>
-                    <span>剩余令牌阈值</span>
-                    <select
+                      type="number"
+                      min={0}
+                      step={1}
                       value={String(draftConfig.contextCompaction.reserveTokens)}
-                      onChange={(event) => updateContextCompaction('reserveTokens', Number(event.target.value))}
-                    >
-                      {[
-                        ...new Set([
-                          draftConfig.contextCompaction.reserveTokens,
-                          ...compactionReserveTokenOptions,
-                        ]),
-                      ].map((tokens) => (
-                        <option key={tokens} value={tokens}>
-                          {tokens.toLocaleString()}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(event) => updateContextCompactionInteger('reserveTokens', event.target.value)}
+                    />
                   </label>
                   <label>
-                    <span>保留最近令牌数</span>
-                    <select
+                    <span>保留最近令牌数 (keepRecentTokens)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
                       value={String(draftConfig.contextCompaction.keepRecentTokens)}
-                      onChange={(event) => updateContextCompaction('keepRecentTokens', Number(event.target.value))}
-                    >
-                      {[
-                        ...new Set([
-                          draftConfig.contextCompaction.keepRecentTokens,
-                          ...compactionKeepRecentTokenOptions,
-                        ]),
-                      ].map((tokens) => (
-                        <option key={tokens} value={tokens}>
-                          {tokens.toLocaleString()}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(event) => updateContextCompactionInteger('keepRecentTokens', event.target.value)}
+                    />
                   </label>
                 </div>
               </section>

@@ -1923,6 +1923,34 @@ dd {
   color: #c7352f;
 }
 
+.segmented-radio-group {
+  background: #f6f8fa;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.segmented-radio-group label {
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.segmented-radio-group label:has(input:checked) {
+  background: #e8f1ee;
+  color: #174f45;
+}
+
+.segmented-radio-group input {
+  accent-color: #1f4d45;
+}
+
 .model-form-layout {
   display: grid;
   gap: 14px;

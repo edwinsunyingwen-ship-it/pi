@@ -408,9 +408,23 @@ export class ConfigService {
 	): ContextCompactionConfig {
 		return {
 			enabled: contextCompaction?.enabled ?? defaultContextCompaction.enabled,
-			reserveTokens: Number(contextCompaction?.reserveTokens ?? defaultContextCompaction.reserveTokens),
-			keepRecentTokens: Number(contextCompaction?.keepRecentTokens ?? defaultContextCompaction.keepRecentTokens),
+			reserveTokens: this.normalizeNonNegativeInteger(
+				contextCompaction?.reserveTokens,
+				defaultContextCompaction.reserveTokens,
+			),
+			keepRecentTokens: this.normalizeNonNegativeInteger(
+				contextCompaction?.keepRecentTokens,
+				defaultContextCompaction.keepRecentTokens,
+			),
 		};
+	}
+
+	private normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+		const numericValue = typeof value === "number" ? value : Number(value);
+		if (!Number.isFinite(numericValue) || numericValue < 0) {
+			return fallback;
+		}
+		return Math.floor(numericValue);
 	}
 
 	private normalizeVariables(variables: ClientVariableConfig[] | undefined): ClientVariableConfig[] {
