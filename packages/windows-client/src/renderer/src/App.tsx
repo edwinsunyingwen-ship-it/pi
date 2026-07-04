@@ -1692,6 +1692,11 @@ function App(): ReactElement {
     status: '',
     triggerMode: '',
   });
+  const [agentFilters, setAgentFilters] = useState({
+    keyword: '',
+    type: '',
+    status: '',
+  });
   const [capabilityEditor, setCapabilityEditor] = useState<CapabilityConfig | null>(null);
   const [capabilityPage, setCapabilityPage] = useState(1);
   const [capabilityPageInput, setCapabilityPageInput] = useState('1');
@@ -1817,6 +1822,30 @@ function App(): ReactElement {
     });
   }, [draftConfig?.capabilities, capabilityFilters]);
 
+  const filteredAgents = useMemo(() => {
+    const agents = draftConfig?.agents ?? [];
+    const keyword = agentFilters.keyword.trim().toLowerCase();
+    return agents.filter((agent) => {
+      const defaultModel = draftConfig?.model.models.find((model) => model.id === agent.defaultModelId);
+      const keywordMatches = keyword
+        ? [
+            agent.name,
+            agent.description,
+            agent.id,
+            agentTypeLabels[agent.type],
+            formatModelName(defaultModel),
+          ].some((value) => value.toLowerCase().includes(keyword))
+        : true;
+      const typeMatches = agentFilters.type ? agent.type === agentFilters.type : true;
+      const statusMatches = agentFilters.status
+        ? agentFilters.status === 'enabled'
+          ? agent.enabled
+          : !agent.enabled
+        : true;
+      return keywordMatches && typeMatches && statusMatches;
+    });
+  }, [agentFilters, draftConfig?.agents, draftConfig?.model.models]);
+
   const modelTotalPages = Math.max(1, Math.ceil(filteredModels.length / modelPageSize));
   const pagedModels = useMemo(() => {
     const safePage = Math.min(modelPage, modelTotalPages);
@@ -1828,12 +1857,11 @@ function App(): ReactElement {
     return filteredCapabilities.slice((safePage - 1) * capabilityPageSize, safePage * capabilityPageSize);
   }, [capabilityPage, capabilityTotalPages, filteredCapabilities]);
 
-  const agentTotalPages = Math.max(1, Math.ceil((draftConfig?.agents.length ?? 0) / agentPageSize));
+  const agentTotalPages = Math.max(1, Math.ceil(filteredAgents.length / agentPageSize));
   const pagedAgents = useMemo(() => {
-    const agents = draftConfig?.agents ?? [];
     const safePage = Math.min(agentPage, agentTotalPages);
-    return agents.slice((safePage - 1) * agentPageSize, safePage * agentPageSize);
-  }, [agentPage, agentTotalPages, draftConfig?.agents]);
+    return filteredAgents.slice((safePage - 1) * agentPageSize, safePage * agentPageSize);
+  }, [agentPage, agentTotalPages, filteredAgents]);
   const auditBusinessActionOptions = useMemo(
     () =>
       Array.from(
@@ -1872,6 +1900,11 @@ function App(): ReactElement {
       setCapabilityPageInput(String(capabilityTotalPages));
     }
   }, [capabilityPage, capabilityTotalPages]);
+
+  useEffect(() => {
+    setAgentPage(1);
+    setAgentPageInput('1');
+  }, [agentFilters]);
 
   useEffect(() => {
     if (agentPage > agentTotalPages) {
@@ -5038,67 +5071,135 @@ function App(): ReactElement {
                     <span>新增智能体</span>
                   </button>
                 </div>
+                <div className="model-toolbar field-filters agent-toolbar">
+                  <label className="keyword-filter">
+                    <span>关键词</span>
+                    <input
+                      value={agentFilters.keyword}
+                      onChange={(event) =>
+                        setAgentFilters((filters) => ({ ...filters, keyword: event.target.value }))
+                      }
+                      placeholder="搜索名称、描述、模型或 ID"
+                    />
+                  </label>
+                  <label>
+                    <span>类型</span>
+                    <select
+                      value={agentFilters.type}
+                      onChange={(event) =>
+                        setAgentFilters((filters) => ({ ...filters, type: event.target.value }))
+                      }
+                    >
+                      <option value="">全部类型</option>
+                      {Object.entries(agentTypeLabels).map(([value, label]) => (
+                        <option value={value} key={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>状态</span>
+                    <select
+                      value={agentFilters.status}
+                      onChange={(event) =>
+                        setAgentFilters((filters) => ({ ...filters, status: event.target.value }))
+                      }
+                    >
+                      <option value="">全部状态</option>
+                      <option value="enabled">已启用</option>
+                      <option value="disabled">未启用</option>
+                    </select>
+                  </label>
+                  <div className="settings-meta compact-meta">
+                    <strong>智能体数量</strong>
+                    <span>{filteredAgents.length} / {draftConfig.agents.length}</span>
+                  </div>
+                </div>
                 <div className="list-page-body">
                 <div className="capability-table">
-                  {draftConfig.agents.length === 0 ? (
-                    <p className="empty-state">暂无智能体。系统会默认创建一个主智能体。</p>
+                  {filteredAgents.length === 0 ? (
+                    <p className="empty-state">
+                      {draftConfig.agents.length === 0 ? '暂无智能体。系统会默认创建一个主智能体。' : '暂无匹配智能体。'}
+                    </p>
                   ) : (
-                    pagedAgents.map((agent) => {
-                      const defaultModel = draftConfig.model.models.find((model) => model.id === agent.defaultModelId);
-                      return (
-                        <div className="capability-row" key={agent.id}>
-                          <div>
-                            <strong>{agent.name}</strong>
-                            <span>{agent.description || '未填写描述'}</span>
+                    <>
+                      <div className="capability-row capability-table-header agent-config-row">
+                        <strong>智能体</strong>
+                        <strong>类型</strong>
+                        <strong>模型</strong>
+                        <strong>能力</strong>
+                        <strong>默认模型</strong>
+                        <strong>状态</strong>
+                        <strong>操作</strong>
+                      </div>
+                      {pagedAgents.map((agent) => {
+                        const defaultModel = draftConfig.model.models.find((model) => model.id === agent.defaultModelId);
+                        return (
+                          <div className="capability-row agent-config-row" key={agent.id}>
+                            <div>
+                              <strong>{agent.name}</strong>
+                              <span>{agent.description || '未填写描述'}</span>
+                            </div>
+                            <small>{agentTypeLabels[agent.type]}</small>
+                            <small>{agent.modelIds.length} 个模型</small>
+                            <small>{agent.capabilityIds.length} 个能力</small>
+                            <small>{formatModelName(defaultModel)}</small>
+                            <small className={agent.enabled ? 'enabled' : 'disabled'}>
+                              {agent.enabled ? '已启用' : '未启用'}
+                            </small>
+                            <div className="list-row-actions">
+                              <button
+                                type="button"
+                                className="quiet-button compact-button"
+                                onClick={() => setAgentEditor(agent)}
+                              >
+                                编辑
+                              </button>
+                              <div className="more-action-menu">
+                                <button
+                                  type="button"
+                                  className="quiet-button compact-button more-action-trigger"
+                                  aria-label={`更多操作：${agent.name}`}
+                                  title="更多操作"
+                                >
+                                  <MoreHorizontal size={16} />
+                                </button>
+                                <div className="more-action-popover">
+                                  <button
+                                    type="button"
+                                    className="quiet-button compact-button"
+                                    onClick={() => duplicateAgentConfig(agent)}
+                                  >
+                                    <Copy size={14} />
+                                    <span>复制</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="quiet-button compact-button"
+                                    onClick={() => saveAgentConfig({ ...agent, enabled: !agent.enabled })}
+                                  >
+                                    {agent.enabled ? '停用' : '启用'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="quiet-button compact-button"
+                                    onClick={() => deleteAgentConfig(agent.id)}
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <small>{agentTypeLabels[agent.type]}</small>
-                          <small>{agent.modelIds.length} 个模型</small>
-                          <small>{agent.capabilityIds.length} 个能力</small>
-                          <small>{formatModelName(defaultModel)}</small>
-                          <small className={agent.enabled ? 'enabled' : 'disabled'}>
-                            {agent.enabled ? '已启用' : '未启用'}
-                          </small>
-                          <div className="button-row">
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              onClick={() => setAgentEditor(agent)}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              onClick={() => duplicateAgentConfig(agent)}
-                            >
-                              <Copy size={14} />
-                              <span>复制</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              onClick={() => saveAgentConfig({ ...agent, enabled: !agent.enabled })}
-                            >
-                              {agent.enabled ? '停用' : '启用'}
-                            </button>
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              onClick={() => deleteAgentConfig(agent.id)}
-                            >
-                              删除
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })}
+                    </>
                   )}
                 </div>
                 </div>
                 {renderLocalPagination({
                   page: agentPage,
                   totalPages: agentTotalPages,
-                  totalItems: draftConfig.agents.length,
+                  totalItems: filteredAgents.length,
                   pageInput: agentPageInput,
                   setPage: setAgentPage,
                   setPageInput: setAgentPageInput,
@@ -5401,7 +5502,7 @@ function App(): ReactElement {
                                 ? '失败'
                                 : '未测试'}
                           </small>
-                          <div className="button-row">
+                          <div className="list-row-actions">
                             <button
                               type="button"
                               className="quiet-button compact-button"
@@ -5411,37 +5512,49 @@ function App(): ReactElement {
                             >
                               编辑
                             </button>
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              onClick={() => duplicateModelProfile(model)}
-                            >
-                              <Copy size={14} />
-                              <span>复制</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              disabled={!model.enabled && model.connectionStatus !== 'success'}
-                              title={!model.enabled && model.connectionStatus !== 'success' ? '请先测试联通成功' : undefined}
-                              onClick={() => updateModelEnabled(model, !model.enabled)}
-                            >
-                              {model.enabled ? '停用' : '启用'}
-                            </button>
-                            <button
-                              type="button"
-                              className="quiet-button compact-button"
-                              onClick={() => deleteModelProfile(model.id)}
-                            >
-                              删除
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button compact-button"
-                              onClick={() => testModelConnection(model)}
-                            >
-                              测试
-                            </button>
+                            <div className="more-action-menu">
+                              <button
+                                type="button"
+                                className="quiet-button compact-button more-action-trigger"
+                                aria-label={`更多操作：${model.displayName}`}
+                                title="更多操作"
+                              >
+                                <MoreHorizontal size={16} />
+                              </button>
+                              <div className="more-action-popover">
+                                <button
+                                  type="button"
+                                  className="quiet-button compact-button"
+                                  onClick={() => duplicateModelProfile(model)}
+                                >
+                                  <Copy size={14} />
+                                  <span>复制</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="quiet-button compact-button"
+                                  disabled={!model.enabled && model.connectionStatus !== 'success'}
+                                  title={!model.enabled && model.connectionStatus !== 'success' ? '请先测试联通成功' : undefined}
+                                  onClick={() => updateModelEnabled(model, !model.enabled)}
+                                >
+                                  {model.enabled ? '停用' : '启用'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="quiet-button compact-button"
+                                  onClick={() => deleteModelProfile(model.id)}
+                                >
+                                  删除
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary-button compact-button"
+                                  onClick={() => testModelConnection(model)}
+                                >
+                                  测试
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -5569,7 +5682,7 @@ function App(): ReactElement {
                               : '未测试'}
                         </small>
                         <small>{capability.enabled ? '已启用' : '未启用'}</small>
-                        <div className="button-row">
+                        <div className="list-row-actions">
                           <button
                             type="button"
                             className="quiet-button compact-button"
@@ -5577,20 +5690,32 @@ function App(): ReactElement {
                           >
                             编辑
                           </button>
-                          <button
-                            type="button"
-                            className="quiet-button compact-button"
-                            onClick={() => updateCapabilityEnabled(capability, !capability.enabled)}
-                          >
-                            {capability.enabled ? '停用' : '启用'}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button compact-button"
-                            onClick={() => testCapabilityConnection(capability)}
-                          >
-                            测试
-                          </button>
+                          <div className="more-action-menu">
+                            <button
+                              type="button"
+                              className="quiet-button compact-button more-action-trigger"
+                              aria-label={`更多操作：${capability.name}`}
+                              title="更多操作"
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+                            <div className="more-action-popover">
+                              <button
+                                type="button"
+                                className="quiet-button compact-button"
+                                onClick={() => updateCapabilityEnabled(capability, !capability.enabled)}
+                              >
+                                {capability.enabled ? '停用' : '启用'}
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button compact-button"
+                                onClick={() => testCapabilityConnection(capability)}
+                              >
+                                测试
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))

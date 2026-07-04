@@ -2045,6 +2045,10 @@ dd {
   padding: 12px;
 }
 
+.agent-config-row {
+  grid-template-columns: minmax(220px, 1.4fr) minmax(74px, 0.42fr) minmax(86px, 0.48fr) minmax(86px, 0.48fr) minmax(180px, 1fr) minmax(78px, 0.42fr) minmax(132px, auto);
+}
+
 .capability-table-header {
   background: transparent;
   border-color: transparent;
@@ -2072,11 +2076,67 @@ dd {
   color: #6b6258;
 }
 
+.list-row-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+  position: relative;
+}
+
+.more-action-menu {
+  position: relative;
+}
+
+.more-action-trigger {
+  justify-content: center;
+  min-width: 42px;
+  padding: 0;
+}
+
+.more-action-popover {
+  background: #fffdfa;
+  border: 1px solid #d9d1c7;
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgb(15 23 42 / 14%);
+  display: none;
+  gap: 6px;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: max-content;
+  z-index: 6;
+}
+
+.more-action-menu:hover .more-action-popover,
+.more-action-menu:focus-within .more-action-popover {
+  display: flex;
+}
+
+.more-action-popover::before {
+  content: "";
+  height: 8px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: -8px;
+}
+
+.more-action-popover .compact-button {
+  white-space: nowrap;
+}
+
 .model-toolbar {
   align-items: stretch;
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.agent-toolbar .keyword-filter {
+  grid-column: span 2;
 }
 
 .capability-list-meta,
@@ -5222,7 +5282,7 @@ option:disabled {
     minmax(86px, 0.55fr)
     minmax(106px, 0.68fr)
     minmax(78px, 0.48fr)
-    minmax(260px, auto);
+    minmax(132px, auto);
 }
 
 .model-row-header {
