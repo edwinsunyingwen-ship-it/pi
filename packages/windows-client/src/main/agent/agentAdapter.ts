@@ -96,6 +96,8 @@ interface ToolResultCapabilityMeta {
 	capabilityName?: string;
 }
 
+const AGENT_REPLY_TIMEOUT_MS = 30 * 60 * 1000;
+
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
 	sendUserMessage(
@@ -1453,7 +1455,7 @@ export default function (pi) {
 		return { systemPrompt, tools, messageCount };
 	}
 
-	private waitForAgentEnd(state: RpcProcessSession, timeoutMs = 180000): Promise<RpcEvent[]> {
+	private waitForAgentEnd(state: RpcProcessSession, timeoutMs = AGENT_REPLY_TIMEOUT_MS): Promise<RpcEvent[]> {
 		return new Promise((resolvePromise, rejectPromise) => {
 			const startedAt = state.events.length;
 			const timer = setTimeout(() => {
