@@ -1,0 +1,1 @@
+{"name":"case_material_status","description":"查询指定案件的材料处理状态，仅用于验证法律案件工具路由。","parameters":{"type":"object","properties":{"case_id":{"type":"string","description":"案件编号，例如 A001"}},"required":["case_id"],"additionalProperties":false}}

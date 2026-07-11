@@ -1,0 +1,35 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 18790,
+  "tools_base_dir": "${STAIX_MTCLAW_TOOLS_DIR}",
+  "routing": {
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "model": "doubao-seed-2-0-mini-260428",
+    "api_key": "${ARK_API_KEY}"
+  },
+  "upstream": {
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "model": "ep-20260711144344-4zm7g",
+    "api_key": "${ARK_API_KEY}"
+  },
+  "functions_file": "${STAIX_MTCLAW_FUNCTIONS_FILE}",
+  "scripts_dir": "${STAIX_MTCLAW_SCRIPTS_DIR}",
+  "max_tool_rounds": 3,
+  "tool_exec_timeout_s": 30,
+  "routing_timeout_s": 30,
+  "fr_completion_check": {
+    "enabled": true,
+    "mode": "strict",
+    "always_true": false
+  },
+  "fr_context_history": {
+    "enabled": true
+  },
+  "fr_context_preserve": {
+    "enabled": false
+  },
+  "delegate_tools_to_openclaw": false,
+  "debug_logging": {
+    "enabled": true
+  }
+}

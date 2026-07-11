@@ -12,6 +12,8 @@ packages/*/dist-firefox/
 
 # Environment
 .env
+mtclaw-integration/config.local.json
+mtclaw-integration/config.local.json
 
 # Editor files
 .vscode/
