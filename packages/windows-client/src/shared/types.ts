@@ -281,6 +281,13 @@ export interface AgentCoreConfig {
 	rpcEndpoint: string;
 }
 
+export interface MtclawRouterConfig {
+	enabled: boolean;
+	baseUrl: string;
+	apiKeyEnv: string;
+	apiKeyValue: string;
+}
+
 export interface ContextCompactionConfig {
 	enabled: boolean;
 	reserveTokens: number;
@@ -459,6 +466,7 @@ export interface AgentConfig {
 
 export interface ClientConfig {
 	agentCore: AgentCoreConfig;
+	mtclawRouter: MtclawRouterConfig;
 	contextCompaction: ContextCompactionConfig;
 	variables: ClientVariableConfig[];
 	model: ModelConfig;

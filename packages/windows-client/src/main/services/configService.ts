@@ -12,6 +12,7 @@ import type {
 	ContextCompactionConfig,
 	ModelConfig,
 	ModelProfileConfig,
+	MtclawRouterConfig,
 } from "../../shared/types";
 import type { AuditLogger } from "./auditLogger";
 
@@ -235,6 +236,12 @@ export class ConfigService {
 				mode: "embedded-rpc",
 				rpcEndpoint: "local-subprocess",
 			},
+			mtclawRouter: {
+				enabled: true,
+				baseUrl: "http://127.0.0.1:18790/v1",
+				apiKeyEnv: "",
+				apiKeyValue: "mtclaw-local",
+			},
 			contextCompaction: {
 				enabled: true,
 				reserveTokens: 16384,
@@ -377,6 +384,7 @@ export class ConfigService {
 				legacyConfig.rpcEndpoint,
 				defaultConfig.agentCore,
 			),
+			mtclawRouter: this.normalizeMtclawRouter(config.mtclawRouter, defaultConfig.mtclawRouter),
 			contextCompaction: this.normalizeContextCompaction(config.contextCompaction, defaultConfig.contextCompaction),
 			variables: this.normalizeVariables(config.variables),
 			model: this.applyModelUsage(model, agents),
@@ -387,6 +395,18 @@ export class ConfigService {
 					? config.defaultAgentId
 					: (agents.find((agent) => agent.enabled && agent.type === "primary")?.id ?? agents[0]?.id ?? null),
 			updatedAt: config.updatedAt ?? defaultConfig.updatedAt,
+		};
+	}
+
+	private normalizeMtclawRouter(
+		router: MtclawRouterConfig | undefined,
+		fallback: MtclawRouterConfig,
+	): MtclawRouterConfig {
+		return {
+			enabled: router?.enabled ?? fallback.enabled,
+			baseUrl: router?.baseUrl?.trim() || fallback.baseUrl,
+			apiKeyEnv: router?.apiKeyEnv?.trim() ?? fallback.apiKeyEnv,
+			apiKeyValue: router?.apiKeyValue ?? fallback.apiKeyValue,
 		};
 	}
 

@@ -10,7 +10,8 @@
   "upstream": {
     "base_url": "https://ark.cn-beijing.volces.com/api/v3",
     "model": "ep-20260711144344-4zm7g",
-    "api_key": "${ARK_API_KEY}"
+    "api_key": "${ARK_API_KEY}",
+    "use_request_model": true
   },
   "functions_file": "${STAIX_MTCLAW_FUNCTIONS_FILE}",
   "scripts_dir": "${STAIX_MTCLAW_SCRIPTS_DIR}",

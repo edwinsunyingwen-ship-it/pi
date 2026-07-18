@@ -12,6 +12,7 @@ import type {
 	McpToolDiscoveryResult,
 	ModelConnectionTestResult,
 	ModelProfileConfig,
+	MtclawRouterConfig,
 } from "../../shared/types";
 import type { AgentAdapter } from "../agent/agentAdapter";
 import type { AuditLogger } from "./auditLogger";
@@ -55,8 +56,9 @@ export class AgentService {
 		);
 		const childAgents = configState.config.agents.filter((item) => agent.childAgentIds.includes(item.id));
 		const effectiveWorkspacePath = workspacePath ?? workspace.path;
+		const runtimeModel = this.getRuntimeModel(model, configState.config.mtclawRouter);
 		const startedSession = await this.adapter.startSession({
-			model,
+			model: runtimeModel,
 			cwd: effectiveWorkspacePath,
 			capabilities: enabledCapabilities,
 			variables: configState.config.variables,
@@ -81,10 +83,45 @@ export class AgentService {
 		await this.writeAudit({
 			sessionId: session.id,
 			businessAction: "start-agent-session",
-			outputSummary: `会话 ${session.id} 已启动。智能体：${agent.name}；模型：${model.provider}/${model.modelId || model.displayName}；能力：${agent.capabilityIds.length} 个。`,
+			outputSummary: `会话 ${session.id} 已启动。智能体：${agent.name}；模型：${model.provider}/${model.modelId || model.displayName}；路由：${configState.config.mtclawRouter.enabled ? "MTClaw" : "直连"}；能力：${agent.capabilityIds.length} 个。`,
 			status: "success",
 		});
 		return session;
+	}
+
+	private getRuntimeModel(
+		model: ModelProfileConfig,
+		router: MtclawRouterConfig,
+	): ModelProfileConfig {
+		if (!router.enabled) {
+			return model;
+		}
+		if (!this.isValidHttpUrl(router.baseUrl)) {
+			throw new Error("MTClaw Router 已启用，但 Base URL 无效。");
+		}
+
+		const compat = this.parseModelCompat(model.compat);
+		return {
+			...model,
+			api: "openai-completions",
+			baseUrl: router.baseUrl.replace(/\/$/, ""),
+			apiKeyEnv: router.apiKeyEnv,
+			apiKeyValue: router.apiKeyValue || "mtclaw-local",
+			authType: router.apiKeyEnv || router.apiKeyValue ? "env" : "none",
+			compat: JSON.stringify({ ...compat, sendSessionAffinityHeaders: true }),
+		};
+	}
+
+	private parseModelCompat(value: string): Record<string, unknown> {
+		if (!value.trim()) {
+			return {};
+		}
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			return this.isRecord(parsed) ? parsed : {};
+		} catch {
+			return {};
+		}
 	}
 
 	async sendUserMessage(
