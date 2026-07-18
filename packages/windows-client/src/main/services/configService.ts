@@ -13,6 +13,7 @@ import type {
 	ModelConfig,
 	ModelProfileConfig,
 	MtclawRouterConfig,
+	MtclawSubagentRole,
 } from "../../shared/types";
 import type { AuditLogger } from "./auditLogger";
 
@@ -181,6 +182,7 @@ export class ConfigService {
 		if (!normalizedAgent) {
 			throw new Error("智能体配置不能为空。");
 		}
+		this.assertValidMtclawSubagent(normalizedAgent, agents);
 		const nextConfig = this.mergeWithDefaults({
 			...current.config,
 			agents,
@@ -364,6 +366,8 @@ export class ConfigService {
 					taskTemplates: [],
 					knowledgeItems: [],
 					type: "primary",
+					mtclawRoutingEnabled: false,
+					mtclawRole: null,
 					parentAgentIds: [],
 					childAgentIds: [],
 					modelIds: [],
@@ -730,6 +734,43 @@ export class ConfigService {
 		return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
 	}
 
+	private normalizeMtclawSubagentRole(value: MtclawSubagentRole | null | undefined): MtclawSubagentRole | null {
+		switch (value) {
+			case "enterprise_due_diligence":
+			case "legal_research":
+			case "contract_counterparty_risk_review":
+				return value;
+			default:
+				return null;
+		}
+	}
+
+	private assertValidMtclawSubagent(agent: AgentConfig, agents: AgentConfig[]): void {
+		if (!agent.mtclawRoutingEnabled) {
+			return;
+		}
+		if (agent.type !== "sub") {
+			throw new Error("只有子智能体可以启用 MTClaw 自动路由。");
+		}
+		if (!agent.mtclawRole) {
+			throw new Error("启用 MTClaw 自动路由前必须选择专业角色。");
+		}
+		if (agent.parentAgentIds.length === 0) {
+			throw new Error("MTClaw 专业子智能体至少需要一个上级智能体。");
+		}
+		if (!agent.defaultModelId) {
+			throw new Error("MTClaw 专业子智能体必须配置默认模型。");
+		}
+
+		const conflictingAgent = agents.find(
+			(item) =>
+				item.id !== agent.id && item.enabled && item.mtclawRoutingEnabled && item.mtclawRole === agent.mtclawRole,
+		);
+		if (agent.enabled && conflictingAgent) {
+			throw new Error(`专业角色已由智能体“${conflictingAgent.name}”启用。`);
+		}
+	}
+
 	private normalizeAgents(
 		agents: AgentConfig[] | undefined,
 		models: ModelProfileConfig[],
@@ -749,6 +790,8 @@ export class ConfigService {
 							taskTemplates: [],
 							knowledgeItems: [],
 							type: "primary" as const,
+							mtclawRoutingEnabled: false,
+							mtclawRole: null,
 							parentAgentIds: [],
 							childAgentIds: [],
 							modelIds: models.filter((model) => model.enabled).map((model) => model.id),
@@ -773,6 +816,7 @@ export class ConfigService {
 					? agent.defaultModelId
 					: (validModelIds[0] ?? null);
 			const type = agent.type === "sub" ? "sub" : "primary";
+			const mtclawRole = type === "sub" ? this.normalizeMtclawSubagentRole(agent.mtclawRole) : null;
 			return {
 				id: agent.id || crypto.randomUUID(),
 				name: agent.name || "未命名智能体",
@@ -804,6 +848,8 @@ export class ConfigService {
 							: item.content.trim().length > 0,
 					),
 				type,
+				mtclawRoutingEnabled: type === "sub" && Boolean(agent.mtclawRoutingEnabled),
+				mtclawRole,
 				parentAgentIds: type === "sub" ? (agent.parentAgentIds ?? []).filter((id) => knownAgentIds.has(id)) : [],
 				childAgentIds: (agent.childAgentIds ?? []).filter((id) => knownAgentIds.has(id) && id !== agent.id),
 				modelIds: validModelIds,

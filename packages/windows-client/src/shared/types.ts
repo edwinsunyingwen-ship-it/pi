@@ -428,6 +428,8 @@ export interface CapabilityConfig {
 
 export type AgentNodeType = "primary" | "sub";
 
+export type MtclawSubagentRole = "enterprise_due_diligence" | "legal_research" | "contract_counterparty_risk_review";
+
 export interface AgentRuleConfig {
 	role: string;
 	goals: string;
@@ -465,6 +467,8 @@ export interface AgentConfig {
 	taskTemplates: AgentTaskTemplate[];
 	knowledgeItems: AgentKnowledgeItem[];
 	type: AgentNodeType;
+	mtclawRoutingEnabled: boolean;
+	mtclawRole: MtclawSubagentRole | null;
 	parentAgentIds: string[];
 	childAgentIds: string[];
 	modelIds: string[];

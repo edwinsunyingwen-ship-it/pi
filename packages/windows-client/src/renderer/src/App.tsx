@@ -54,6 +54,7 @@ import type {
   ModelProfileConfig,
   ModelSetupMode,
   MtclawRouterConfig,
+  MtclawSubagentRole,
   StoredAgentConversation,
   UpdateState,
   WorkspaceFileInfo,
@@ -429,6 +430,12 @@ const agentTypeLabels: Record<AgentConfig['type'], string> = {
   sub: '子智能体',
 };
 
+const mtclawSubagentRoleLabels: Record<MtclawSubagentRole, string> = {
+  enterprise_due_diligence: '企业主体核验与风险尽调',
+  legal_research: '法规和类案研究',
+  contract_counterparty_risk_review: '合同相对方与合同风险审查',
+};
+
 function formatBytes(size: number): string {
   if (size < 1024) {
     return `${size} B`;
@@ -744,6 +751,8 @@ function createAgentConfig(): AgentConfig {
     taskTemplates: [],
     knowledgeItems: [],
     type: 'primary',
+    mtclawRoutingEnabled: false,
+    mtclawRole: null,
     parentAgentIds: [],
     childAgentIds: [],
     modelIds: [],
@@ -825,6 +834,8 @@ function copyAgentConfig(agent: AgentConfig): AgentConfig {
     ...agent,
     id: crypto.randomUUID(),
     name: appendCopySuffix(agent.name, '未命名智能体'),
+    mtclawRoutingEnabled: false,
+    mtclawRole: null,
     taskTemplates: agent.taskTemplates.map((template) => ({
       ...template,
       id: crypto.randomUUID(),
@@ -2818,6 +2829,28 @@ function App(): ReactElement {
       setStatusText('智能体至少需要关联一个可用模型');
       return;
     }
+    if (agent.mtclawRoutingEnabled && agent.type !== 'sub') {
+      setConfigNotice({ tone: 'error', text: '只有子智能体可以启用 MTClaw 自动路由。' });
+      setStatusText('只有子智能体可以启用 MTClaw 自动路由');
+      return;
+    }
+    if (agent.mtclawRoutingEnabled && !agent.mtclawRole) {
+      setConfigNotice({ tone: 'error', text: '启用 MTClaw 自动路由前必须选择专业角色。' });
+      setStatusText('请选择 MTClaw 专业角色');
+      return;
+    }
+    const conflictingAgent = draftConfig?.agents.find(
+      (item) =>
+        item.id !== agent.id &&
+        item.enabled &&
+        item.mtclawRoutingEnabled &&
+        item.mtclawRole === agent.mtclawRole,
+    );
+    if (agent.enabled && agent.mtclawRoutingEnabled && conflictingAgent) {
+      setConfigNotice({ tone: 'error', text: `专业角色已由智能体“${conflictingAgent.name}”启用。` });
+      setStatusText('MTClaw 专业角色存在启用冲突');
+      return;
+    }
 
     const normalizedAgent = {
       ...agent,
@@ -2827,6 +2860,8 @@ function App(): ReactElement {
           ? agent.defaultModelId
           : agent.modelIds[0],
       parentAgentIds: agent.type === 'sub' ? agent.parentAgentIds : [],
+      mtclawRoutingEnabled: agent.type === 'sub' && agent.mtclawRoutingEnabled,
+      mtclawRole: agent.type === 'sub' ? agent.mtclawRole : null,
       childAgentIds: agent.childAgentIds.filter((id) => id !== agent.id),
       knowledgeItems: agent.knowledgeItems
         .map((item) => ({
@@ -3486,6 +3521,20 @@ function App(): ReactElement {
 
   function updateAgentEditor<K extends keyof AgentConfig>(key: K, value: AgentConfig[K]): void {
     setAgentEditor((agent) => (agent ? { ...agent, [key]: value } : agent));
+  }
+
+  function updateAgentType(type: AgentConfig['type']): void {
+    setAgentEditor((agent) =>
+      agent
+        ? {
+            ...agent,
+            type,
+            parentAgentIds: type === 'sub' ? agent.parentAgentIds : [],
+            mtclawRoutingEnabled: type === 'sub' && agent.mtclawRoutingEnabled,
+            mtclawRole: type === 'sub' ? agent.mtclawRole : null,
+          }
+        : agent,
+    );
   }
 
   function updateAgentRule(key: keyof AgentRuleConfig, value: string): void {
@@ -5220,6 +5269,12 @@ function App(): ReactElement {
                             <div>
                               <strong>{agent.name}</strong>
                               <span>{agent.description || '未填写描述'}</span>
+                              {agent.type === 'sub' && agent.mtclawRoutingEnabled && (
+                                <span>
+                                  {agent.mtclawRole ? mtclawSubagentRoleLabels[agent.mtclawRole] : '未选择专业角色'}
+                                  {' · '}配置已登记，Runtime 待接入
+                                </span>
+                              )}
                             </div>
                             <small>{agentTypeLabels[agent.type]}</small>
                             <small>{agent.modelIds.length} 个模型</small>
@@ -6260,13 +6315,70 @@ function App(): ReactElement {
                 <select
                   value={agentEditor.type}
                   onChange={(event) =>
-                    updateAgentEditor('type', event.target.value as AgentConfig['type'])
+                    updateAgentType(event.target.value as AgentConfig['type'])
                   }
                 >
                   <option value="primary">主智能体</option>
                   <option value="sub">子智能体</option>
                 </select>
               </label>
+              {agentEditor.type === 'sub' && (
+                <>
+                  <div className="form-section-heading wide-field">
+                    <strong>MTClaw 专业路由</strong>
+                    <span>稳定角色供 Function Router 自动选择；真实任务仍由 pi-agent 子智能体 Runtime 执行。</span>
+                  </div>
+                  <label>
+                    <span>专业角色</span>
+                    <select
+                      value={agentEditor.mtclawRole ?? ''}
+                      onChange={(event) =>
+                        updateAgentEditor('mtclawRole', (event.target.value || null) as MtclawSubagentRole | null)
+                      }
+                    >
+                      <option value="">请选择</option>
+                      {Object.entries(mtclawSubagentRoleLabels).map(([value, label]) => (
+                        <option value={value} key={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>MTClaw 自动路由</span>
+                    <div className="segmented-radio-group">
+                      <label>
+                        <input
+                          type="radio"
+                          name="agent-mtclaw-routing-enabled"
+                          checked={agentEditor.mtclawRoutingEnabled}
+                          onChange={() => updateAgentEditor('mtclawRoutingEnabled', true)}
+                        />
+                        <span>允许</span>
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="agent-mtclaw-routing-enabled"
+                          checked={!agentEditor.mtclawRoutingEnabled}
+                          onChange={() => updateAgentEditor('mtclawRoutingEnabled', false)}
+                        />
+                        <span>不允许</span>
+                      </label>
+                    </div>
+                  </label>
+                  <div className="settings-meta wide-field">
+                    <strong>
+                      {agentEditor.mtclawRoutingEnabled &&
+                      agentEditor.mtclawRole &&
+                      agentEditor.parentAgentIds.length > 0 &&
+                      agentEditor.defaultModelId &&
+                      agentEditor.enabled
+                        ? '专业角色配置就绪'
+                        : '专业角色配置未就绪'}
+                    </strong>
+                    <span>本批次只保存并校验产品配置；真实 Runtime 调度尚未接入，不会因此自动执行。</span>
+                  </div>
+                </>
+              )}
               <label>
                 <span>最大层级</span>
                 <input

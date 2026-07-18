@@ -167,7 +167,7 @@ sequenceDiagram
 |---|---|---|
 | pi-agent 主 Runtime | 已存在 | 保持并增强审计关联 |
 | MTClaw Provider | 已接通并完成 Smoke 验证 | 承担所有竞赛专业请求的自动路由 |
-| Staix 子智能体配置 | 已存在 | 成为专业 Subagent 的唯一配置来源 |
+| Staix 子智能体配置 | 已增加三个稳定专业角色、自动路由开关和保存校验 | 成为专业 Subagent 的唯一配置来源 |
 | 真实子智能体执行 | 尚未完整接入 Windows 产品链 | 由 pi-agent 隔离执行 |
 | 专业工具 | 当前为 Smoke Tool | 接入三个专业 Subagent 的真实能力 |
 | 竞赛证据 | 可验证 Router 基础链路 | 可验证自动路由、专业执行、回答模型和全链路审计 |
