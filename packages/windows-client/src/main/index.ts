@@ -15,6 +15,7 @@ import type {
 	LocalPathOpenResult,
 	ModelConfig,
 	ModelProfileConfig,
+	MtclawRouterConfig,
 } from "../shared/types";
 import { RpcAgentAdapter } from "./agent/agentAdapter";
 import { configureStaixAppIdentity } from "./appIdentity";
@@ -148,6 +149,12 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.configGet, () => configService.getConfig());
 	ipcMain.handle(IPC_CHANNELS.configSaveAgentCore, (_event, agentCore: AgentCoreConfig) =>
 		configService.saveAgentCoreConfig(agentCore),
+	);
+	ipcMain.handle(IPC_CHANNELS.configSaveMtclawRouter, (_event, router: MtclawRouterConfig) =>
+		configService.saveMtclawRouterConfig(router),
+	);
+	ipcMain.handle(IPC_CHANNELS.configTestMtclawRouter, (_event, router: MtclawRouterConfig) =>
+		agentService.testMtclawRouterConnection(router),
 	);
 	ipcMain.handle(IPC_CHANNELS.configSaveContextCompaction, (_event, contextCompaction: ContextCompactionConfig) =>
 		configService.saveContextCompactionConfig(contextCompaction),

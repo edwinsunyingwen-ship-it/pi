@@ -286,6 +286,17 @@ export interface MtclawRouterConfig {
 	baseUrl: string;
 	apiKeyEnv: string;
 	apiKeyValue: string;
+	connectionStatus: ModelConnectionStatus;
+	lastTestedAt: string | null;
+}
+
+export interface MtclawRouterConnectionTestResult {
+	status: "success" | "failure";
+	message: string;
+	testedAt: string;
+	healthStatus?: string;
+	readyStatus?: string;
+	toolsLoaded?: number;
 }
 
 export interface ContextCompactionConfig {
@@ -485,6 +496,8 @@ export interface WindowsClientApi {
 	getEnvironment: () => Promise<AppEnvironment>;
 	getClientConfig: () => Promise<ClientConfigState>;
 	saveAgentCoreConfig: (agentCore: AgentCoreConfig) => Promise<ClientConfigState>;
+	saveMtclawRouterConfig: (router: MtclawRouterConfig) => Promise<ClientConfigState>;
+	testMtclawRouterConfig: (router: MtclawRouterConfig) => Promise<MtclawRouterConnectionTestResult>;
 	saveContextCompactionConfig: (contextCompaction: ContextCompactionConfig) => Promise<ClientConfigState>;
 	saveVariablesConfig: (variables: ClientVariableConfig[]) => Promise<ClientConfigState>;
 	saveModelConfig: (model: ModelConfig) => Promise<ClientConfigState>;

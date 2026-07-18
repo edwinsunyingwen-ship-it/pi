@@ -48,6 +48,23 @@ export class ConfigService {
 		return { configPath: this.configPath, config: nextConfig };
 	}
 
+	async saveMtclawRouterConfig(mtclawRouter: MtclawRouterConfig): Promise<ClientConfigState> {
+		const current = await this.getConfig();
+		const nextConfig = this.mergeWithDefaults({
+			...current.config,
+			mtclawRouter,
+			updatedAt: new Date().toISOString(),
+		});
+
+		await this.writeConfig(
+			nextConfig,
+			true,
+			"save-mtclaw-router-config",
+			`更新 MTClaw Function Router 配置；状态：${mtclawRouter.enabled ? "启用" : "停用"}。`,
+		);
+		return { configPath: this.configPath, config: nextConfig };
+	}
+
 	async saveContextCompactionConfig(contextCompaction: ContextCompactionConfig): Promise<ClientConfigState> {
 		const current = await this.getConfig();
 		const nextConfig = this.mergeWithDefaults({
@@ -241,6 +258,8 @@ export class ConfigService {
 				baseUrl: "http://127.0.0.1:18790/v1",
 				apiKeyEnv: "",
 				apiKeyValue: "mtclaw-local",
+				connectionStatus: "untested",
+				lastTestedAt: null,
 			},
 			contextCompaction: {
 				enabled: true,
@@ -407,6 +426,8 @@ export class ConfigService {
 			baseUrl: router?.baseUrl?.trim() || fallback.baseUrl,
 			apiKeyEnv: router?.apiKeyEnv?.trim() ?? fallback.apiKeyEnv,
 			apiKeyValue: router?.apiKeyValue ?? fallback.apiKeyValue,
+			connectionStatus: router?.connectionStatus ?? fallback.connectionStatus,
+			lastTestedAt: router?.lastTestedAt ?? fallback.lastTestedAt,
 		};
 	}
 

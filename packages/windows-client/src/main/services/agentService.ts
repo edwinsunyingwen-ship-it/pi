@@ -13,6 +13,7 @@ import type {
 	ModelConnectionTestResult,
 	ModelProfileConfig,
 	MtclawRouterConfig,
+	MtclawRouterConnectionTestResult,
 } from "../../shared/types";
 import type { AgentAdapter } from "../agent/agentAdapter";
 import type { AuditLogger } from "./auditLogger";
@@ -89,10 +90,7 @@ export class AgentService {
 		return session;
 	}
 
-	private getRuntimeModel(
-		model: ModelProfileConfig,
-		router: MtclawRouterConfig,
-	): ModelProfileConfig {
+	private getRuntimeModel(model: ModelProfileConfig, router: MtclawRouterConfig): ModelProfileConfig {
 		if (!router.enabled) {
 			return model;
 		}
@@ -142,6 +140,12 @@ export class AgentService {
 			const result = await this.adapter.sendUserMessage(sessionId, message, images, onProgress);
 			await this.writeModelInteractionAudits(sessionId, result.modelInteractions ?? []);
 			await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
+			const configState = await this.configService.getConfig();
+			if (configState.config.mtclawRouter.enabled) {
+				const routerEvent = await this.captureMtclawRouterTrace(sessionId, configState.config.mtclawRouter);
+				onProgress?.(routerEvent);
+				result.progressEvents = [...(result.progressEvents ?? []), routerEvent];
+			}
 			await this.writeAudit({
 				sessionId,
 				businessAction: "agent-assistant-reply",
@@ -158,6 +162,57 @@ export class AgentService {
 				errorMessage: error instanceof Error ? error.message : String(error),
 			});
 			throw error;
+		}
+	}
+
+	async testMtclawRouterConnection(router: MtclawRouterConfig): Promise<MtclawRouterConnectionTestResult> {
+		const testedAt = new Date().toISOString();
+		if (!this.isValidHttpUrl(router.baseUrl)) {
+			const message = "MTClaw Router Base URL 无效，必须是 http:// 或 https:// 开头的完整地址。";
+			await this.writeAudit({
+				businessAction: "test-mtclaw-router-connection",
+				inputSummary: router.baseUrl,
+				outputSummary: message,
+				status: "failure",
+			});
+			return { status: "failure", message, testedAt };
+		}
+
+		try {
+			const [health, ready, tools] = await Promise.all([
+				this.fetchMtclawRouterJson(router, "/health"),
+				this.fetchMtclawRouterJson(router, "/ready"),
+				this.fetchMtclawRouterJson(router, "/v1/tools"),
+			]);
+			const healthStatus = this.getStringProperty(health, "status") || "unknown";
+			const readyStatus = this.getStringProperty(ready, "status") || "unknown";
+			const toolsLoaded = this.getMtclawToolCount(tools);
+			if (healthStatus !== "ok" || readyStatus !== "ok") {
+				throw new Error(`Router 状态异常：health=${healthStatus}，ready=${readyStatus}`);
+			}
+			const message = `MTClaw Function Router 已就绪，加载 ${toolsLoaded} 个专业工具。`;
+			await this.writeAudit({
+				toolName: "mtclaw-function-router",
+				businessAction: "test-mtclaw-router-connection",
+				inputSummary: router.baseUrl,
+				outputSummary: message,
+				status: "success",
+			});
+			return { status: "success", message, testedAt, healthStatus, readyStatus, toolsLoaded };
+		} catch (error) {
+			const errorMessage = this.truncate(
+				this.redactSensitive(error instanceof Error ? error.message : String(error)),
+				500,
+			);
+			const message = `MTClaw Function Router 联通失败：${errorMessage}`;
+			await this.writeAudit({
+				toolName: "mtclaw-function-router",
+				businessAction: "test-mtclaw-router-connection",
+				inputSummary: router.baseUrl,
+				status: "failure",
+				errorMessage: message,
+			});
+			return { status: "failure", message, testedAt };
 		}
 	}
 
@@ -616,6 +671,119 @@ export class AgentService {
 			return url.protocol === "http:" || url.protocol === "https:";
 		} catch {
 			return false;
+		}
+	}
+
+	private getMtclawRouterRoot(baseUrl: string): string {
+		return baseUrl.trim().replace(/\/$/, "").replace(/\/v1$/, "");
+	}
+
+	private getMtclawRouterHeaders(router: MtclawRouterConfig): Record<string, string> {
+		const environmentValue = router.apiKeyEnv ? process.env[router.apiKeyEnv] : undefined;
+		const apiKey = environmentValue?.trim() || router.apiKeyValue.trim();
+		return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+	}
+
+	private async fetchMtclawRouterJson(router: MtclawRouterConfig, path: string): Promise<unknown> {
+		const response = await fetch(`${this.getMtclawRouterRoot(router.baseUrl)}${path}`, {
+			headers: this.getMtclawRouterHeaders(router),
+			signal: AbortSignal.timeout(10000),
+		});
+		const text = await response.text();
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}：${this.redactSensitive(text).slice(0, 500)}`);
+		}
+		return text.trim() ? (JSON.parse(text) as unknown) : {};
+	}
+
+	private getStringProperty(value: unknown, key: string): string {
+		return this.isRecord(value) && typeof value[key] === "string" ? value[key] : "";
+	}
+
+	private getMtclawToolCount(value: unknown): number {
+		if (Array.isArray(value)) {
+			return value.length;
+		}
+		return this.isRecord(value) && Array.isArray(value.tools) ? value.tools.length : 0;
+	}
+
+	private async captureMtclawRouterTrace(sessionId: string, router: MtclawRouterConfig): Promise<AgentProgressEvent> {
+		const timestamp = new Date().toISOString();
+		try {
+			const history = await this.fetchMtclawRouterJson(router, "/v1/tool_history?limit=20");
+			const entries = this.isRecord(history) && Array.isArray(history.entries) ? history.entries : [];
+			const entry = entries.find(
+				(item) => this.isRecord(item) && this.getStringProperty(item, "session_key") === sessionId,
+			);
+			if (!entry || !this.isRecord(entry)) {
+				const detail = "请求已由 pi-agent 发送到 MTClaw，但 Router 尚未返回对应会话的追踪记录。";
+				await this.writeAudit({
+					sessionId,
+					toolName: "mtclaw-function-router",
+					businessAction: "mtclaw-router-trace",
+					outputSummary: detail,
+					status: "success",
+				});
+				return {
+					id: `mtclaw-router-${sessionId}-${Date.now()}`,
+					sessionId,
+					timestamp,
+					title: "MTClaw 路由已完成",
+					detail,
+					status: "info",
+				};
+			}
+
+			const toolCalls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
+			const toolNames = toolCalls
+				.map((call) => (this.isRecord(call) ? this.getStringProperty(call, "name") : ""))
+				.filter(Boolean);
+			const llmCalls = Array.isArray(entry.llm_calls) ? entry.llm_calls : [];
+			const modelNames = llmCalls
+				.map((call) => (this.isRecord(call) ? this.getStringProperty(call, "model") : ""))
+				.filter(Boolean);
+			const detail = [
+				"pi-agent 会话保持不变",
+				`Router 专业工具：${toolNames.length > 0 ? toolNames.join("、") : "未调用"}`,
+				`Router/回答模型调用：${modelNames.length > 0 ? modelNames.join(" -> ") : "已记录"}`,
+			].join("；");
+			await this.writeAudit({
+				sessionId,
+				toolName: "mtclaw-function-router",
+				businessAction: "mtclaw-router-trace",
+				inputSummary: `Router session_key=${sessionId}`,
+				outputSummary: detail,
+				fullOutput: this.redactSensitive(JSON.stringify(entry, null, 2)),
+				status: "success",
+			});
+			return {
+				id: `mtclaw-router-${sessionId}-${Date.now()}`,
+				sessionId,
+				timestamp,
+				title: "MTClaw 路由追踪",
+				detail,
+				status: "success",
+			};
+		} catch (error) {
+			const detail = `回答已完成，但读取 MTClaw 路由追踪失败：${this.truncate(
+				this.redactSensitive(error instanceof Error ? error.message : String(error)),
+				300,
+			)}`;
+			await this.writeAudit({
+				sessionId,
+				toolName: "mtclaw-function-router",
+				businessAction: "mtclaw-router-trace",
+				status: "failure",
+				errorMessage: detail,
+			});
+			return {
+				id: `mtclaw-router-${sessionId}-${Date.now()}`,
+				sessionId,
+				timestamp,
+				title: "MTClaw 路由追踪不可用",
+				detail,
+				status: "info",
+			};
 		}
 	}
 

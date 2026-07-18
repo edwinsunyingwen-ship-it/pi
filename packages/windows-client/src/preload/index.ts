@@ -6,6 +6,8 @@ const api: WindowsClientApi = {
 	getEnvironment: () => ipcRenderer.invoke(IPC_CHANNELS.getEnvironment),
 	getClientConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configGet),
 	saveAgentCoreConfig: (agentCore) => ipcRenderer.invoke(IPC_CHANNELS.configSaveAgentCore, agentCore),
+	saveMtclawRouterConfig: (router) => ipcRenderer.invoke(IPC_CHANNELS.configSaveMtclawRouter, router),
+	testMtclawRouterConfig: (router) => ipcRenderer.invoke(IPC_CHANNELS.configTestMtclawRouter, router),
 	saveContextCompactionConfig: (contextCompaction) =>
 		ipcRenderer.invoke(IPC_CHANNELS.configSaveContextCompaction, contextCompaction),
 	saveVariablesConfig: (variables) => ipcRenderer.invoke(IPC_CHANNELS.configSaveVariables, variables),

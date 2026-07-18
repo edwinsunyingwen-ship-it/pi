@@ -53,6 +53,7 @@ import type {
   ModelInputCapability,
   ModelProfileConfig,
   ModelSetupMode,
+  MtclawRouterConfig,
   StoredAgentConversation,
   UpdateState,
   WorkspaceFileInfo,
@@ -165,7 +166,7 @@ const textAttachmentExtensions = new Set([
 
 type AppMenuName = 'File' | 'Edit' | 'View' | 'Window' | 'Help';
 type AppSection = 'workbench' | 'search' | 'workspace' | 'agent' | 'config' | 'logs' | 'billing';
-type ConfigTab = 'agents' | 'models' | 'core' | 'capabilities' | 'archived' | 'context-compaction';
+type ConfigTab = 'agents' | 'models' | 'router' | 'core' | 'capabilities' | 'archived' | 'context-compaction';
 
 interface AppMenuItem {
   label: string;
@@ -195,6 +196,7 @@ const auditActionLabels: Record<string, string> = {
   'read-workspace-file': '读取工作区文件',
   'save-client-config': '保存客户端配置',
   'save-agent-core-config': '保存内核配置',
+  'save-mtclaw-router-config': '保存 MTClaw Router 配置',
   'save-model-config': '保存模型配置',
   'delete-model-config': '删除模型配置',
   'save-capability-config': '保存业务能力',
@@ -205,6 +207,8 @@ const auditActionLabels: Record<string, string> = {
   'capability-invoked': '调用能力',
   'capability-result': '能力返回',
   'test-model-connection': '模型联通测试',
+  'test-mtclaw-router-connection': 'MTClaw Router 联通测试',
+  'mtclaw-router-trace': 'MTClaw 路由追踪',
   'discover-mcp-tools': '发现 MCP 工具',
   'model-request-context': '模型上下文',
   'model-request-payload': '模型请求载荷',
@@ -2742,6 +2746,48 @@ function App(): ReactElement {
     await refreshAuditLogs();
   }
 
+  async function saveMtclawRouterConfig(): Promise<void> {
+    if (!draftConfig) {
+      return;
+    }
+    if (!isValidHttpUrl(draftConfig.mtclawRouter.baseUrl)) {
+      setConfigNotice({ tone: 'error', text: 'MTClaw Router Base URL 格式不正确。' });
+      setStatusText('MTClaw Router Base URL 格式不正确');
+      return;
+    }
+
+    setStatusText('正在保存 MTClaw Router 配置');
+    const nextConfig = await window.windowsClient.saveMtclawRouterConfig(draftConfig.mtclawRouter);
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    setConfigNotice({
+      tone: 'success',
+      text: `MTClaw Router 配置已保存，新会话将使用${nextConfig.config.mtclawRouter.enabled ? '专业路由模式' : '模型直连模式'}。`,
+    });
+    setStatusText('MTClaw Router 配置已保存');
+    await refreshAuditLogs();
+  }
+
+  async function testMtclawRouterConnection(): Promise<void> {
+    if (!draftConfig) {
+      return;
+    }
+    setConfigNotice({ tone: 'info', text: '正在检查 Router health、ready 和专业工具清单。' });
+    setStatusText('正在测试 MTClaw Router 联通');
+    const result = await window.windowsClient.testMtclawRouterConfig(draftConfig.mtclawRouter);
+    const testedRouter: MtclawRouterConfig = {
+      ...draftConfig.mtclawRouter,
+      connectionStatus: result.status,
+      lastTestedAt: result.testedAt,
+    };
+    const nextConfig = await window.windowsClient.saveMtclawRouterConfig(testedRouter);
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    setConfigNotice({ tone: result.status === 'success' ? 'success' : 'error', text: result.message });
+    setStatusText(result.message);
+    await refreshAuditLogs();
+  }
+
   async function saveContextCompactionConfig(): Promise<void> {
     if (!draftConfig) {
       return;
@@ -3181,6 +3227,26 @@ function App(): ReactElement {
     setDraftConfig((config) =>
       config ? { ...config, agentCore: { ...config.agentCore, [key]: value } } : config,
     );
+  }
+
+  function updateMtclawRouter<K extends keyof MtclawRouterConfig>(
+    key: K,
+    value: MtclawRouterConfig[K],
+  ): void {
+    setDraftConfig((config) => {
+      if (!config) {
+        return config;
+      }
+      const connectionChanged = key === 'baseUrl' || key === 'apiKeyEnv' || key === 'apiKeyValue';
+      return {
+        ...config,
+        mtclawRouter: {
+          ...config.mtclawRouter,
+          [key]: value,
+          ...(connectionChanged ? { connectionStatus: 'untested' as const, lastTestedAt: null } : {}),
+        },
+      };
+    });
   }
 
   function updateContextCompaction<K extends keyof ContextCompactionConfig>(
@@ -4493,6 +4559,10 @@ function App(): ReactElement {
                       <span className={`status-dot ${sessionStarting ? 'running' : sessionReady ? 'online' : 'offline'}`} />
                       <strong>{sessionStarting ? '准备中' : sessionReady ? '已就绪' : '未就绪'}</strong>
                     </div>
+                    <div className={`agent-runtime-state ${draftConfig?.mtclawRouter.enabled ? 'online' : 'offline'}`}>
+                      <span className={`status-dot ${draftConfig?.mtclawRouter.enabled ? 'online' : 'offline'}`} />
+                      <strong>{draftConfig?.mtclawRouter.enabled ? 'MTClaw 路由' : '模型直连'}</strong>
+                    </div>
                   </div>
                 </div>
 
@@ -4725,6 +4795,11 @@ function App(): ReactElement {
                   <div className="context-summary">
                     <small>默认模型</small>
                     <strong>{formatModelName(selectedAgentModel)}</strong>
+                  </div>
+                  <div className="context-summary">
+                    <small>模型请求路径</small>
+                    <strong>{draftConfig?.mtclawRouter.enabled ? 'pi-agent -> MTClaw Router -> 回答模型' : 'pi-agent -> 回答模型'}</strong>
+                    <span>会话、上下文、附件、通用工具和权限始终由 pi-agent Runtime 管理。</span>
                   </div>
                   <div className="context-summary">
                     <small>运行时工具</small>
@@ -5052,6 +5127,13 @@ function App(): ReactElement {
                 </button>
                 <button
                   type="button"
+                  className={activeConfigTab === 'router' ? 'active' : ''}
+                  onClick={() => setActiveConfigTab('router')}
+                >
+                  MTClaw Router
+                </button>
+                <button
+                  type="button"
                   className={activeConfigTab === 'core' ? 'active' : ''}
                   onClick={() => setActiveConfigTab('core')}
                 >
@@ -5307,6 +5389,97 @@ function App(): ReactElement {
                       onChange={(event) => updateAgentCore('rpcEndpoint', event.target.value)}
                       placeholder="例如 local-subprocess 或 http://127.0.0.1:3000"
                     />
+                  </label>
+                </div>
+              </section>
+              )}
+
+              {activeConfigTab === 'router' && (
+              <section className="config-block list-page">
+                <div className="section-title-row">
+                  <div>
+                    <strong>MTClaw Function Router</strong>
+                    <span>作为 pi-agent 的 OpenAI-compatible Provider 路由层；不接管会话、工作区、附件、Skill、通用工具或权限。</span>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" className="secondary-button" onClick={testMtclawRouterConnection}>
+                      <RefreshCw size={16} />
+                      <span>测试 Router</span>
+                    </button>
+                    <button type="button" onClick={saveMtclawRouterConfig}>
+                      <Save size={16} />
+                      <span>保存 Router 配置</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="settings-grid">
+                  <label>
+                    <span>请求模式</span>
+                    <div className="segmented-radio-group">
+                      <label>
+                        <input
+                          type="radio"
+                          name="mtclaw-router-enabled"
+                          checked={draftConfig.mtclawRouter.enabled}
+                          onChange={() => updateMtclawRouter('enabled', true)}
+                        />
+                        <span>MTClaw 专业路由</span>
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="mtclaw-router-enabled"
+                          checked={!draftConfig.mtclawRouter.enabled}
+                          onChange={() => updateMtclawRouter('enabled', false)}
+                        />
+                        <span>回答模型直连</span>
+                      </label>
+                    </div>
+                    <small className="field-hint">保存后对新会话生效；两种模式都继续使用 pi-agent Runtime。</small>
+                  </label>
+                  <label>
+                    <span>Router 状态</span>
+                    <input
+                      readOnly
+                      value={
+                        draftConfig.mtclawRouter.connectionStatus === 'success'
+                          ? '已就绪'
+                          : draftConfig.mtclawRouter.connectionStatus === 'failure'
+                            ? '联通失败'
+                            : '未测试'
+                      }
+                    />
+                    <small className="field-hint">
+                      {draftConfig.mtclawRouter.lastTestedAt
+                        ? `最近测试：${formatLocalTimestamp(draftConfig.mtclawRouter.lastTestedAt)}`
+                        : '尚未执行 Router 联通测试。'}
+                    </small>
+                  </label>
+                  <label className="wide-field">
+                    <span>OpenAI-compatible Base URL</span>
+                    <input
+                      value={draftConfig.mtclawRouter.baseUrl}
+                      onChange={(event) => updateMtclawRouter('baseUrl', event.target.value)}
+                      placeholder="http://127.0.0.1:18790/v1"
+                    />
+                  </label>
+                  <label>
+                    <span>API Key 环境变量</span>
+                    <input
+                      value={draftConfig.mtclawRouter.apiKeyEnv}
+                      onChange={(event) => updateMtclawRouter('apiKeyEnv', event.target.value.trim())}
+                      placeholder="可选，例如 MTCLAW_API_KEY"
+                    />
+                  </label>
+                  <label>
+                    <span>本地 Router Token</span>
+                    <input
+                      type="password"
+                      value={draftConfig.mtclawRouter.apiKeyValue}
+                      onChange={(event) => updateMtclawRouter('apiKeyValue', event.target.value)}
+                      placeholder="mtclaw-local"
+                    />
+                    <small className="field-hint">仅用于 Staix 到本地 Router 的认证，不是回答模型的供应商 API Key。</small>
                   </label>
                 </div>
               </section>
