@@ -1532,6 +1532,7 @@ export default function (pi) {
 				continue;
 			}
 			this.emitProgress(state, {
+				id: progressEvent.id,
 				sessionId: state.session.id,
 				timestamp: progressEvent.timestamp,
 				title: `子智能体 · ${prefix} · ${progressEvent.title}`,
@@ -1591,12 +1592,13 @@ export default function (pi) {
 
 	private emitProgress(
 		state: RpcProcessSession,
-		event: Omit<AgentProgressEvent, "id" | "timestamp"> & { timestamp?: string },
+		event: Omit<AgentProgressEvent, "id" | "timestamp"> & { id?: string; timestamp?: string },
 	): void {
+		const { id, timestamp, ...eventDetails } = event;
 		const progressEvent: AgentProgressEvent = {
-			id: crypto.randomUUID(),
-			timestamp: event.timestamp ?? new Date().toISOString(),
-			...event,
+			id: id ?? crypto.randomUUID(),
+			timestamp: timestamp ?? new Date().toISOString(),
+			...eventDetails,
 		};
 		state.progressEvents.push(progressEvent);
 		state.progressHandler?.(progressEvent);

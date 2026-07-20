@@ -22,6 +22,8 @@ import type { SubagentDelegationRequest, SubagentDelegationResult } from "./suba
 import type { WorkspaceService } from "./workspaceService";
 
 export class AgentService {
+	private readonly liveProgressHandlers = new Map<string, (event: AgentProgressEvent) => void>();
+
 	constructor(
 		private readonly adapter: AgentAdapter,
 		private readonly auditLogger: AuditLogger,
@@ -153,6 +155,9 @@ export class AgentService {
 			fullInput: message,
 			status: "success",
 		});
+		if (onProgress) {
+			this.liveProgressHandlers.set(sessionId, onProgress);
+		}
 
 		try {
 			const result = await this.adapter.sendUserMessage(sessionId, message, images, onProgress);
@@ -180,6 +185,10 @@ export class AgentService {
 				errorMessage: error instanceof Error ? error.message : String(error),
 			});
 			throw error;
+		} finally {
+			if (onProgress && this.liveProgressHandlers.get(sessionId) === onProgress) {
+				this.liveProgressHandlers.delete(sessionId);
+			}
 		}
 	}
 
@@ -256,7 +265,17 @@ export class AgentService {
 				].join("\n"),
 				isolated: true,
 			});
-			const result = await this.adapter.sendUserMessage(childSession.id, objective);
+			const parentProgressHandler = this.liveProgressHandlers.get(request.parentSessionId);
+			const result = await this.adapter.sendUserMessage(
+				childSession.id,
+				objective,
+				undefined,
+				parentProgressHandler
+					? (event) => {
+							parentProgressHandler(this.toParentSubagentProgressEvent(request, subagent, event));
+						}
+					: undefined,
+			);
 			await this.writeModelInteractionAudits(childSession.id, result.modelInteractions ?? []);
 			result.capabilityCalls = await this.writeCapabilityCallAudits(childSession.id, result.capabilityCalls ?? []);
 			const endedAt = new Date().toISOString();
@@ -276,7 +295,10 @@ export class AgentService {
 					capabilityName: call.capabilityName,
 					status: call.status,
 				})),
-				progressEvents: result.progressEvents ?? [],
+				progressEvents: (result.progressEvents ?? []).map((event) => ({
+					...event,
+					id: this.getParentSubagentProgressEventId(request.taskId, event.id),
+				})),
 				limitations: [],
 				errors: [],
 				startedAt,
@@ -310,6 +332,28 @@ export class AgentService {
 				}
 			}
 		}
+	}
+
+	private toParentSubagentProgressEvent(
+		request: SubagentDelegationRequest,
+		subagent: AgentConfig,
+		event: AgentProgressEvent,
+	): AgentProgressEvent {
+		return {
+			...event,
+			id: this.getParentSubagentProgressEventId(request.taskId, event.id),
+			sessionId: request.parentSessionId,
+			title: `子智能体 · ${subagent.name} · ${event.title}`,
+			source: "subagent",
+			taskId: request.taskId,
+			childSessionId: event.sessionId,
+			subagentRole: request.role,
+			subagentName: subagent.name,
+		};
+	}
+
+	private getParentSubagentProgressEventId(taskId: string, childEventId: string): string {
+		return `subagent-${taskId}-${childEventId}`;
 	}
 
 	async testMtclawRouterConnection(router: MtclawRouterConfig): Promise<MtclawRouterConnectionTestResult> {
