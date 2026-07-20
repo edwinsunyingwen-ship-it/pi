@@ -24,6 +24,7 @@ import { AuditLogger } from "./services/auditLogger";
 import { BrowserToolService } from "./services/browserToolService";
 import { ConfigService } from "./services/configService";
 import { ConversationStoreService } from "./services/conversationStoreService";
+import { SubagentBridgeService } from "./services/subagentBridgeService";
 import { UpdateService } from "./services/updateService";
 import { WorkspaceFileService } from "./services/workspaceFileService";
 import { WorkspaceService } from "./services/workspaceService";
@@ -35,10 +36,15 @@ const configService = new ConfigService(auditLogger);
 const workspaceService = new WorkspaceService(auditLogger);
 const workspaceFileService = new WorkspaceFileService(workspaceService, auditLogger);
 const browserToolService = new BrowserToolService(auditLogger);
+const subagentBridgeService = new SubagentBridgeService();
 const conversationStoreService = new ConversationStoreService();
 const updateService = new UpdateService();
-const agentAdapter = new RpcAgentAdapter(() => browserToolService.getBridgeConfig());
+const agentAdapter = new RpcAgentAdapter(
+	() => browserToolService.getBridgeConfig(),
+	() => subagentBridgeService.getBridgeConfig(),
+);
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
+subagentBridgeService.setHandler((request) => agentService.delegateSubagent(request));
 const mainDir = dirname(fileURLToPath(import.meta.url));
 const appIconPath = join(mainDir, "../../build/icon.ico");
 

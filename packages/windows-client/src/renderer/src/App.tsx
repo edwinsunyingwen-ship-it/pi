@@ -5272,7 +5272,7 @@ function App(): ReactElement {
                               {agent.type === 'sub' && agent.mtclawRoutingEnabled && (
                                 <span>
                                   {agent.mtclawRole ? mtclawSubagentRoleLabels[agent.mtclawRole] : '未选择专业角色'}
-                                  {' · '}配置已登记，Runtime 待接入
+                                  {' · '}pi-agent 专业委托已启用
                                 </span>
                               )}
                             </div>
@@ -6375,7 +6375,9 @@ function App(): ReactElement {
                         ? '专业角色配置就绪'
                         : '专业角色配置未就绪'}
                     </strong>
-                    <span>本批次只保存并校验产品配置；真实 Runtime 调度尚未接入，不会因此自动执行。</span>
+                    <span>
+                      配置就绪后，MTClaw 可通过委托协议启动 pi-agent 隔离子任务；真实可用性仍取决于 Router、模型和已绑定能力联通。
+                    </span>
                   </div>
                 </>
               )}

@@ -10,7 +10,9 @@
 - 输出结构化事实、来源、判断、限制和错误，供当前智能体回答模型生成最终回答。
 - 不把缺失数据、模型推断或查询失败伪装成已核验事实。
 
-当前产品配置已固定三个稳定角色，并允许在 Staix 子智能体编辑器中登记是否接受 MTClaw 自动路由。该开关目前只形成配置和校验基础；在 pi-agent 子任务桥接完成前，不代表专业 Subagent 已可自动执行。
+术语不变量：`enterprise_due_diligence`、`legal_research` 和 `contract_counterparty_risk_review` 是 Subagent 稳定角色；`delegate_to_subagent` 是协议层委托入口；QCC、HTTP API、MCP、浏览器、文件和 Shell 才是该子智能体可以选择的 Tools。
+
+当前产品配置已固定三个稳定角色，并允许在 Staix 子智能体编辑器中登记是否接受 MTClaw 自动路由。通用 `delegate_to_subagent` 桥接会根据该配置启动隔离 pi-agent RPC 子任务；是否能够形成真实业务成果仍取决于 Router、子智能体模型及其已绑定能力的实际联通验证。
 
 ## 2. 通用调用合同
 

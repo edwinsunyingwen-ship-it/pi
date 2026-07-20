@@ -29,12 +29,7 @@
   "fr_context_preserve": {
     "enabled": false
   },
-  "delegate_tools_to_openclaw": {
-    "enabled": true,
-    "tools": [
-      "delegate_to_subagent"
-    ]
-  },
+  "delegate_tools_to_openclaw": false,
   "debug_logging": {
     "enabled": true
   }

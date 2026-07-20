@@ -56,6 +56,8 @@ flowchart LR
 
 图中的 Subagent 节点表达 MTClaw 的路由目标；真正的上下文管理和能力执行发生在 pi-agent 子智能体 Runtime 中。
 
+MTClaw 通过 OpenAI-compatible `tool_calls` 返回 `delegate_to_subagent`，只是因为 callable 在协议层统一表示为 Tool。该名称代表任务委托协议，不代表企业尽调、法规研究或合同审查本身是一个原子 Tool。
+
 ## 3. 控制面与执行面
 
 | 层 | 负责 | 不负责 |
@@ -63,7 +65,7 @@ flowchart LR
 | Staix | 产品 UI、业务配置、会话、附件、工作区、凭据入口、审计展示 | 模型路由算法、替代 Agent Runtime |
 | AgentService / RpcAgentAdapter | 把产品配置转换为 pi-agent 会话和 RPC 调用 | 专业业务路由 |
 | pi-agent | 主/子智能体上下文、工具执行、权限确认、取消、超时、结果回传 | 竞赛专业意图分类 |
-| MTClaw Function Router | 自动选择/编排专业 Subagent，维护 Router 上下文和路由轨迹 | 文件权限、工作区、通用 Tool 管理 |
+| MTClaw Function Router | 自动选择/编排专业 Subagent，通过委托协议返回稳定角色和任务目标，维护 Router 上下文和路由轨迹 | 文件权限、工作区、通用 Tool 管理、直接执行企业查询 |
 | Router 模型 | 路由决策和专业能力选择 | 面向用户生成最终业务回答 |
 | 当前智能体回答模型 | 基于上下文和专业结果生成最终回答 | 替代 Router 决策 |
 
@@ -143,7 +145,7 @@ sequenceDiagram
 |---|---|---|
 | 当前回答模型和凭据 | Staix 模型配置 | 请求中的模型 ID；凭据通过受控 Provider 配置获取 |
 | Router 模型和凭据 | MTClaw Router 配置 | Router 专用配置 |
-| Subagent 名称、职责、模型、能力 | Staix 智能体配置 | 轻量路由描述和稳定调用名称 |
+| Subagent 名称、职责、模型、能力 | Staix 智能体配置 | `delegate_to_subagent` 的轻量角色描述；不复制业务能力配置 |
 | QCC、MCP、HTTP API、浏览器等 | Staix 能力配置 | 不重复保存业务凭据，只通过子智能体调用 |
 | Skill、知识和任务模板 | Staix 配置 | 不复制全文，仅由被调度的 pi 子智能体加载 |
 
@@ -168,6 +170,6 @@ sequenceDiagram
 | pi-agent 主 Runtime | 已存在 | 保持并增强审计关联 |
 | MTClaw Provider | 已接通并完成 Smoke 验证 | 承担所有竞赛专业请求的自动路由 |
 | Staix 子智能体配置 | 已增加三个稳定专业角色、自动路由开关和保存校验 | 成为专业 Subagent 的唯一配置来源 |
-| 真实子智能体执行 | 尚未完整接入 Windows 产品链 | 由 pi-agent 隔离执行 |
+| 真实子智能体执行 | 已增加通用委托桥接和隔离 pi-agent RPC 子任务；仍需完成真实模型与能力验收 | 由 pi-agent 隔离执行并补齐取消、层级和审计展示 |
 | 专业工具 | 当前为 Smoke Tool | 接入三个专业 Subagent 的真实能力 |
 | 竞赛证据 | 可验证 Router 基础链路 | 可验证自动路由、专业执行、回答模型和全链路审计 |

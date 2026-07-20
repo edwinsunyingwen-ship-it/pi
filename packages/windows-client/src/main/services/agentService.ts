@@ -18,6 +18,7 @@ import type {
 import type { AgentAdapter } from "../agent/agentAdapter";
 import type { AuditLogger } from "./auditLogger";
 import type { ConfigService } from "./configService";
+import type { SubagentDelegationRequest, SubagentDelegationResult } from "./subagentBridgeService";
 import type { WorkspaceService } from "./workspaceService";
 
 export class AgentService {
@@ -55,7 +56,17 @@ export class AgentService {
 		const enabledCapabilities = configState.config.capabilities.filter(
 			(capability) => capability.enabled && agent.capabilityIds.includes(capability.id),
 		);
-		const childAgents = configState.config.agents.filter((item) => agent.childAgentIds.includes(item.id));
+		const childAgents = configState.config.agents.filter(
+			(item) =>
+				item.id !== agent.id && (agent.childAgentIds.includes(item.id) || item.parentAgentIds.includes(agent.id)),
+		);
+		const delegatableSubagents = childAgents
+			.filter((item) => item.enabled && item.type === "sub" && item.mtclawRoutingEnabled && item.mtclawRole !== null)
+			.map((item) => ({
+				role: item.mtclawRole as NonNullable<typeof item.mtclawRole>,
+				name: item.name,
+				description: item.description,
+			}));
 		const effectiveWorkspacePath = workspacePath ?? workspace.path;
 		const runtimeModel = this.getRuntimeModel(model, configState.config.mtclawRouter);
 		const startedSession = await this.adapter.startSession({
@@ -71,6 +82,10 @@ export class AgentService {
 				childAgents,
 				effectiveWorkspacePath,
 			),
+			subagentDelegation:
+				configState.config.mtclawRouter.enabled && delegatableSubagents.length > 0
+					? { callerAgentId: agent.id, agents: delegatableSubagents }
+					: undefined,
 		});
 		const runtimeSession = await this.adapter.getSessionState(startedSession.id);
 		const session: AgentSession = {
@@ -162,6 +177,131 @@ export class AgentService {
 				errorMessage: error instanceof Error ? error.message : String(error),
 			});
 			throw error;
+		}
+	}
+
+	async delegateSubagent(request: SubagentDelegationRequest): Promise<SubagentDelegationResult> {
+		const startedAt = new Date().toISOString();
+		const [workspace, configState] = await Promise.all([
+			this.workspaceService.getWorkspace(),
+			this.configService.getConfig(),
+		]);
+		const caller = configState.config.agents.find((item) => item.id === request.callerAgentId && item.enabled);
+		if (!caller) {
+			throw new Error("Subagent delegation caller is not an enabled Staix agent.");
+		}
+		const subagent = configState.config.agents.find(
+			(item) =>
+				item.enabled &&
+				item.type === "sub" &&
+				item.mtclawRoutingEnabled &&
+				item.mtclawRole === request.role &&
+				(caller.childAgentIds.includes(item.id) || item.parentAgentIds.includes(caller.id)),
+		);
+		if (!subagent) {
+			throw new Error(`当前智能体没有可委托的专业子智能体：${request.role}。`);
+		}
+
+		const model =
+			configState.config.model.models.find((profile) => profile.id === subagent.defaultModelId && profile.enabled) ??
+			configState.config.model.models.find((profile) => subagent.modelIds.includes(profile.id) && profile.enabled) ??
+			null;
+		if (!model?.provider || !model.modelId) {
+			throw new Error(`专业子智能体“${subagent.name}”没有可用的回答模型。`);
+		}
+		const enabledCapabilities = configState.config.capabilities.filter(
+			(capability) => capability.enabled && subagent.capabilityIds.includes(capability.id),
+		);
+		const childAgents = configState.config.agents.filter(
+			(item) =>
+				item.id !== subagent.id &&
+				(subagent.childAgentIds.includes(item.id) || item.parentAgentIds.includes(subagent.id)),
+		);
+		const objective = request.context
+			? `${request.objective}\n\n## 委托上下文\n${request.context}`
+			: request.objective;
+		let childSession: AgentSession | null = null;
+
+		await this.writeAudit({
+			sessionId: request.parentSessionId,
+			businessAction: "delegate-subagent-start",
+			inputSummary: `${request.role}：${this.truncate(request.objective)}`,
+			fullInput: request.objective,
+			outputSummary: `准备由 pi-agent 子智能体“${subagent.name}”执行任务 ${request.taskId}。`,
+			status: "success",
+		});
+
+		try {
+			childSession = await this.adapter.startSession({
+				model,
+				cwd: workspace.path,
+				capabilities: enabledCapabilities,
+				variables: configState.config.variables,
+				contextCompaction: configState.config.contextCompaction,
+				appendSystemPrompt: [
+					this.buildAgentAppendSystemPrompt(subagent, model, enabledCapabilities, childAgents, workspace.path),
+					"",
+					"# 专业子任务委托合同",
+					`- 任务 ID：${request.taskId}`,
+					`- 稳定角色：${request.role}`,
+					"- 这是由 MTClaw Router 选择并由 pi-agent 隔离 Runtime 执行的专业子任务。",
+					"- 根据任务需要自主选择已绑定工具；不要把一次工具调用冒充为完整子智能体执行。",
+					"- 输出可复核的事实、来源、判断、限制和错误；不得编造未查询到的数据。",
+				].join("\n"),
+				isolated: true,
+			});
+			const result = await this.adapter.sendUserMessage(childSession.id, objective);
+			await this.writeModelInteractionAudits(childSession.id, result.modelInteractions ?? []);
+			await this.writeCapabilityCallAudits(childSession.id, result.capabilityCalls ?? []);
+			const endedAt = new Date().toISOString();
+			const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+			const delegationResult: SubagentDelegationResult = {
+				taskId: request.taskId,
+				parentSessionId: request.parentSessionId,
+				childSessionId: childSession.id,
+				role: request.role,
+				agentId: subagent.id,
+				agentName: subagent.name,
+				status: "success",
+				summary: result.responseText,
+				toolCalls: (result.capabilityCalls ?? []).map((call) => ({
+					toolName: call.toolName,
+					capabilityId: call.capabilityId,
+					capabilityName: call.capabilityName,
+					status: call.status,
+				})),
+				limitations: [],
+				errors: [],
+				startedAt,
+				endedAt,
+				durationMs,
+			};
+			await this.writeAudit({
+				sessionId: request.parentSessionId,
+				businessAction: "delegate-subagent-result",
+				inputSummary: `${request.role} / ${request.taskId}`,
+				outputSummary: this.truncate(result.responseText, 500),
+				fullOutput: result.responseText,
+				status: "success",
+			});
+			return delegationResult;
+		} catch (error) {
+			await this.writeAudit({
+				sessionId: request.parentSessionId,
+				businessAction: "delegate-subagent-result",
+				inputSummary: `${request.role} / ${request.taskId}`,
+				status: "failure",
+				errorMessage: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		} finally {
+			if (childSession) {
+				try {
+					await this.adapter.stopSession(childSession.id);
+				} catch {
+					// The child runtime may already have exited after a provider or tool failure.
+				}
+			}
 		}
 	}
 
@@ -950,7 +1090,7 @@ export class AgentService {
 			"## 工作方式补充",
 			"- 使用中文与用户沟通，除非用户明确要求其他语言。",
 			"- 回答时优先围绕当前智能体职责、当前工作区和用户明确选择的上下文。",
-			"- 如果任务适合拆给子智能体，先说明拆分建议；当前版本还未实现真实子智能体自动调度时，不要假装已经完成调度。",
+			"- 如果任务适合专业子智能体，只有在实际调用 delegate_to_subagent 并收到结构化结果后，才可以声称已经完成子任务调度。",
 		].join("\n");
 	}
 

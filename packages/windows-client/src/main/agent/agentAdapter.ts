@@ -18,7 +18,14 @@ import type {
 	ClientVariableConfig,
 	ContextCompactionConfig,
 	ModelProfileConfig,
+	MtclawSubagentRole,
 } from "../../shared/types";
+
+export interface DelegatableSubagent {
+	role: MtclawSubagentRole;
+	name: string;
+	description: string;
+}
 
 export interface AgentStartOptions {
 	model: ModelProfileConfig | null;
@@ -27,6 +34,10 @@ export interface AgentStartOptions {
 	variables?: ClientVariableConfig[];
 	contextCompaction?: ContextCompactionConfig;
 	appendSystemPrompt?: string;
+	subagentDelegation?: {
+		callerAgentId: string;
+		agents: DelegatableSubagent[];
+	};
 	isolated?: boolean;
 }
 
@@ -112,6 +123,7 @@ export interface AgentAdapter {
 }
 
 type BrowserBridgeProvider = () => Promise<{ url: string; token: string } | null>;
+type SubagentBridgeProvider = () => Promise<{ url: string; token: string } | null>;
 
 interface RpcProcessSession {
 	process: ChildProcessWithoutNullStreams;
@@ -134,7 +146,10 @@ interface RpcProcessSession {
 export class RpcAgentAdapter implements AgentAdapter {
 	private readonly sessions = new Map<string, RpcProcessSession>();
 
-	constructor(private readonly browserBridgeProvider?: BrowserBridgeProvider) {}
+	constructor(
+		private readonly browserBridgeProvider?: BrowserBridgeProvider,
+		private readonly subagentBridgeProvider?: SubagentBridgeProvider,
+	) {}
 
 	async startSession(options: AgentStartOptions = { model: null, cwd: null }): Promise<AgentSession> {
 		const session: AgentSession = {
@@ -362,6 +377,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 		const browserExtensionPath = await this.writeBrowserBridgeExtension(options.capabilities ?? [], agentDir);
 		if (browserExtensionPath) {
 			args.push("--extension", browserExtensionPath);
+		}
+		const subagentExtensionPath = await this.writeSubagentBridgeExtension(options, agentDir, sessionId);
+		if (subagentExtensionPath) {
+			args.push("--extension", subagentExtensionPath);
 		}
 
 		const isDevelopment = process.env.NODE_ENV === "development";
@@ -887,6 +906,117 @@ export default function (pi) {
       },
     });
   }
+}
+`;
+		await writeFile(extensionPath, source, "utf8");
+		return extensionPath;
+	}
+
+	private async writeSubagentBridgeExtension(
+		options: AgentStartOptions,
+		agentDir: string,
+		parentSessionId: string,
+	): Promise<string | null> {
+		const delegation = options.subagentDelegation;
+		if (!delegation || delegation.agents.length === 0 || !this.subagentBridgeProvider) {
+			return null;
+		}
+		const bridge = await this.subagentBridgeProvider();
+		if (!bridge) {
+			return null;
+		}
+
+		const extensionDir = join(agentDir, "windows-subagent-bridge");
+		await mkdir(extensionDir, { recursive: true });
+		const extensionPath = join(extensionDir, "index.mjs");
+		const source = `const bridge = ${JSON.stringify(bridge, null, 2)};
+const parentSessionId = ${JSON.stringify(parentSessionId)};
+const callerAgentId = ${JSON.stringify(delegation.callerAgentId)};
+const delegatableAgents = ${JSON.stringify(delegation.agents, null, 2)};
+
+const Params = {
+  type: "object",
+  properties: {
+    role: {
+      type: "string",
+      enum: delegatableAgents.map((agent) => agent.role),
+      description: "Stable Staix professional subagent role.",
+    },
+    objective: {
+      type: "string",
+      minLength: 1,
+      description: "The complete business objective delegated to the subagent.",
+    },
+    context: {
+      type: "string",
+      description: "Optional facts, constraints, or document references needed by the delegated task.",
+    },
+  },
+  required: ["role", "objective"],
+  additionalProperties: false,
+};
+
+function buildDescription() {
+  const roles = delegatableAgents
+    .map((agent) => \`- \${agent.role}: \${agent.name}. \${agent.description || ""}\`)
+    .join("\\n");
+  return [
+    "Delegate a complete professional task to a configured Staix subagent.",
+    "This is a subagent task delegation boundary, not an atomic business data tool.",
+    "The child pi-agent runtime dynamically loads the selected subagent's model, rules, knowledge, skills, and assigned capabilities.",
+    roles,
+  ].join("\\n");
+}
+
+export default function (pi) {
+  pi.registerTool({
+    name: "delegate_to_subagent",
+    label: "Delegate to professional subagent",
+    description: buildDescription(),
+    promptSnippet: "delegate_to_subagent: delegate a complete professional task to a configured pi-agent child runtime.",
+    promptGuidelines: [
+      "Use this only for a complete professional task that benefits from an isolated subagent.",
+      "Do not use it as a replacement for an atomic HTTP, MCP, browser, file, or shell tool call.",
+    ],
+    parameters: Params,
+    async execute(_toolCallId, params, signal) {
+      const allowed = delegatableAgents.some((agent) => agent.role === params.role);
+      if (!allowed) {
+        throw new Error(\`Subagent role is not available to the current agent: \${String(params.role)}\`);
+      }
+      const response = await fetch(bridge.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: \`Bearer \${bridge.token}\`,
+        },
+        body: JSON.stringify({
+          taskId: crypto.randomUUID(),
+          parentSessionId,
+          callerAgentId,
+          role: params.role,
+          objective: params.objective,
+          context: params.context || "",
+        }),
+        signal,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(\`Subagent delegation failed: HTTP \${response.status} \${text.slice(0, 1200)}\`);
+      }
+      const result = JSON.parse(text);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: {
+          taskId: result.taskId,
+          childSessionId: result.childSessionId,
+          subagentRole: result.role,
+          subagentName: result.agentName,
+          status: result.status,
+        },
+      };
+    },
+  });
 }
 `;
 		await writeFile(extensionPath, source, "utf8");
