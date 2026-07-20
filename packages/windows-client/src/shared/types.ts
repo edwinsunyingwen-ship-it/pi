@@ -87,6 +87,11 @@ export interface AgentProgressEvent {
 	detail?: string;
 	status: AgentProgressEventStatus;
 	durationMs?: number;
+	source?: "main" | "subagent";
+	taskId?: string;
+	childSessionId?: string;
+	subagentRole?: MtclawSubagentRole;
+	subagentName?: string;
 }
 
 export interface AgentImageContent {

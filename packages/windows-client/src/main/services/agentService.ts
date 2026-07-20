@@ -72,6 +72,9 @@ export class AgentService {
 		const startedSession = await this.adapter.startSession({
 			model: runtimeModel,
 			cwd: effectiveWorkspacePath,
+			agentId: agent.id,
+			agentName: agent.name,
+			modelProfileId: model.id,
 			capabilities: enabledCapabilities,
 			variables: configState.config.variables,
 			contextCompaction: configState.config.contextCompaction,
@@ -154,7 +157,7 @@ export class AgentService {
 		try {
 			const result = await this.adapter.sendUserMessage(sessionId, message, images, onProgress);
 			await this.writeModelInteractionAudits(sessionId, result.modelInteractions ?? []);
-			await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
+			result.capabilityCalls = await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
 			const configState = await this.configService.getConfig();
 			if (configState.config.mtclawRouter.enabled) {
 				const routerEvent = await this.captureMtclawRouterTrace(sessionId, configState.config.mtclawRouter);
@@ -235,6 +238,9 @@ export class AgentService {
 			childSession = await this.adapter.startSession({
 				model,
 				cwd: workspace.path,
+				agentId: subagent.id,
+				agentName: subagent.name,
+				modelProfileId: model.id,
 				capabilities: enabledCapabilities,
 				variables: configState.config.variables,
 				contextCompaction: configState.config.contextCompaction,
@@ -252,7 +258,7 @@ export class AgentService {
 			});
 			const result = await this.adapter.sendUserMessage(childSession.id, objective);
 			await this.writeModelInteractionAudits(childSession.id, result.modelInteractions ?? []);
-			await this.writeCapabilityCallAudits(childSession.id, result.capabilityCalls ?? []);
+			result.capabilityCalls = await this.writeCapabilityCallAudits(childSession.id, result.capabilityCalls ?? []);
 			const endedAt = new Date().toISOString();
 			const durationMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
 			const delegationResult: SubagentDelegationResult = {
@@ -270,6 +276,7 @@ export class AgentService {
 					capabilityName: call.capabilityName,
 					status: call.status,
 				})),
+				progressEvents: result.progressEvents ?? [],
 				limitations: [],
 				errors: [],
 				startedAt,
@@ -604,65 +611,87 @@ export class AgentService {
 		});
 	}
 
-	private async writeCapabilityCallAudits(sessionId: string, calls: AgentCapabilityCallLog[]): Promise<void> {
+	private async writeCapabilityCallAudits(
+		sessionId: string,
+		calls: AgentCapabilityCallLog[],
+	): Promise<AgentCapabilityCallLog[]> {
 		if (calls.length === 0) {
-			return;
+			return [];
 		}
 
 		const session = await this.adapter.getSessionState(sessionId);
 		const configState = await this.configService.getConfig();
 		const activeAgent = configState.config.agents.find((agent) => agent.id === session?.agentId);
-		const enabledCapabilities = configState.config.capabilities.filter(
-			(capability) => capability.enabled && (!activeAgent || activeAgent.capabilityIds.includes(capability.id)),
-		);
+		const enabledCapabilities = activeAgent
+			? configState.config.capabilities.filter(
+					(capability) => capability.enabled && activeAgent.capabilityIds.includes(capability.id),
+				)
+			: [];
+		const resolvedCalls: AgentCapabilityCallLog[] = [];
 
 		for (const call of calls) {
 			const matchedCapability = this.findMatchingCapability(call, enabledCapabilities);
-			const capabilityMeta = this.getCapabilityMeta(call, matchedCapability);
+			const resolvedCall: AgentCapabilityCallLog = matchedCapability
+				? {
+						...call,
+						capabilityId: matchedCapability.id,
+						capabilityName: matchedCapability.name,
+					}
+				: {
+						...call,
+						capabilityId: undefined,
+						capabilityName: undefined,
+					};
+			resolvedCalls.push(resolvedCall);
+			const capabilityMeta = this.getCapabilityMeta(resolvedCall, matchedCapability);
 			const callSummary = capabilityMeta.join("；");
-			if (call.inputSummary) {
-				const input = this.redactSensitive(call.inputSummary);
+			if (resolvedCall.inputSummary) {
+				const input = this.redactSensitive(resolvedCall.inputSummary);
 				await this.writeAudit({
 					sessionId,
-					toolName: call.toolName,
+					toolName: resolvedCall.toolName,
 					businessAction: "capability-invoked",
-					operationStartedAt: call.startedAt,
+					operationStartedAt: resolvedCall.startedAt,
 					inputSummary: this.truncate(input, 500),
 					outputSummary: callSummary,
-					fullInput: call.fullInput ? this.redactSensitive(call.fullInput) : input,
+					fullInput: resolvedCall.fullInput ? this.redactSensitive(resolvedCall.fullInput) : input,
 					fullOutput: callSummary,
 					status: "success",
 				});
 			}
 
 			const resultSummary = this.redactSensitive(
-				call.outputSummary ||
+				resolvedCall.outputSummary ||
 					`能力 ${capabilityMeta[0]?.replace(/^能力：/, "") || "未知能力"} 已执行，但没有返回可展示内容。`,
 			);
 			const resultOutput = `${callSummary}；返回：${resultSummary}`;
 			await this.writeAudit({
 				sessionId,
-				toolName: call.toolName,
+				toolName: resolvedCall.toolName,
 				businessAction: "capability-result",
-				operationStartedAt: call.startedAt,
-				operationEndedAt: call.endedAt,
-				inputSummary: call.inputSummary ? this.truncate(this.redactSensitive(call.inputSummary), 240) : undefined,
+				operationStartedAt: resolvedCall.startedAt,
+				operationEndedAt: resolvedCall.endedAt,
+				inputSummary: resolvedCall.inputSummary
+					? this.truncate(this.redactSensitive(resolvedCall.inputSummary), 240)
+					: undefined,
 				outputSummary: this.truncate(resultOutput, 500),
-				fullInput: call.fullInput
-					? this.redactSensitive(call.fullInput)
-					: call.inputSummary
-						? this.redactSensitive(call.inputSummary)
+				fullInput: resolvedCall.fullInput
+					? this.redactSensitive(resolvedCall.fullInput)
+					: resolvedCall.inputSummary
+						? this.redactSensitive(resolvedCall.inputSummary)
 						: undefined,
-				fullOutput: call.fullOutput
-					? `${callSummary}；返回：${this.redactSensitive(call.fullOutput)}`
+				fullOutput: resolvedCall.fullOutput
+					? `${callSummary}；返回：${this.redactSensitive(resolvedCall.fullOutput)}`
 					: resultOutput,
-				status: call.status,
+				status: resolvedCall.status,
 				errorMessage:
-					call.status === "failure"
-						? this.truncate(this.redactSensitive(call.outputSummary ?? ""), 500)
+					resolvedCall.status === "failure"
+						? this.truncate(this.redactSensitive(resolvedCall.outputSummary ?? ""), 500)
 						: undefined,
 			});
 		}
+
+		return resolvedCalls;
 	}
 
 	private async writeModelInteractionAudits(
@@ -704,7 +733,7 @@ export class AgentService {
 	}
 
 	private getCapabilityDisplayName(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string {
-		return capability?.name || call.capabilityName || call.toolName || call.toolCallId || "未知能力";
+		return capability?.name || call.toolName || call.toolCallId || "未知能力";
 	}
 
 	private getCapabilityMeta(call: AgentCapabilityCallLog, capability?: CapabilityConfig): string[] {
@@ -771,28 +800,87 @@ export class AgentService {
 			}
 		}
 
-		const haystack = [call.toolName, call.inputSummary, call.outputSummary].filter(Boolean).join("\n").toLowerCase();
-
-		return capabilities.find((capability) => {
-			const normalizedToolName = this.normalizePromptToolName(capability.toolName || capability.name || "http_tool");
-			const candidates = [
-				capability.name,
+		const capabilityByToolName = capabilities.filter((capability) => {
+			const configuredNames = [
 				capability.toolName,
-				normalizedToolName,
-				capability.category,
-				capability.useWhen,
-				capability.avoidWhen,
-				capability.command,
-				capability.endpoint,
-				capability.mcpServerName,
-				capability.mcpUrl,
-				...capability.mcpTools.flatMap((tool) => [tool.name, tool.description]),
-				...capability.tags,
-			]
-				.filter(Boolean)
-				.map((value) => value.toLowerCase());
-			return candidates.some((value) => value && haystack.includes(value));
+				capability.toolName ? this.normalizePromptToolName(capability.toolName) : "",
+				...capability.mcpTools.filter((tool) => tool.enabled).map((tool) => tool.name),
+			].filter(Boolean);
+			return configuredNames.includes(call.toolName);
 		});
+		if (capabilityByToolName.length === 1) {
+			return capabilityByToolName[0];
+		}
+
+		if (call.toolName === "bash") {
+			return this.findMatchingCommandCapability(call, capabilities);
+		}
+
+		return undefined;
+	}
+
+	private findMatchingCommandCapability(
+		call: AgentCapabilityCallLog,
+		capabilities: CapabilityConfig[],
+	): CapabilityConfig | undefined {
+		const command = this.extractCommandInput(call.fullInput) || this.extractCommandInput(call.inputSummary);
+		const executable = command ? this.extractCommandExecutable(command) : "";
+		if (!executable) {
+			return undefined;
+		}
+
+		const commandCapabilities = capabilities.filter(
+			(capability) => capability.type === "command" || capability.executionMode === "command",
+		);
+		const matches = commandCapabilities
+			.map((capability) => ({
+				capability,
+				score:
+					(this.containsCommandExecutable(capability.command, executable) ? 2 : 0) +
+					(this.containsCommandExecutable(capability.content, executable) ? 1 : 0),
+			}))
+			.filter((match) => match.score > 0);
+		const highestScore = Math.max(0, ...matches.map((match) => match.score));
+		const bestMatches = matches.filter((match) => match.score === highestScore);
+		return bestMatches.length === 1 ? bestMatches[0].capability : undefined;
+	}
+
+	private extractCommandInput(value: string | undefined): string {
+		if (!value?.trim()) {
+			return "";
+		}
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			if (this.isRecord(parsed) && typeof parsed.command === "string") {
+				return parsed.command;
+			}
+		} catch {
+			// Input summaries may be plain command strings rather than JSON.
+		}
+		return value;
+	}
+
+	private extractCommandExecutable(command: string): string {
+		const firstSegment = command.split(/(?:\r?\n|&&|\|\||[;|])/)[0]?.trim() ?? "";
+		const tokens =
+			firstSegment.match(/"[^"]+"|'[^']+'|\S+/g)?.map((token) => token.replace(/^['"]|['"]$/g, "")) ?? [];
+		let index = 0;
+		while (index < tokens.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]) || tokens[index] === "env")) {
+			index++;
+		}
+		if (tokens[index] === "sudo") {
+			index++;
+		}
+		const executable = tokens[index] ?? "";
+		return executable.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
+	}
+
+	private containsCommandExecutable(source: string, executable: string): boolean {
+		if (!source.trim() || !executable) {
+			return false;
+		}
+		const escaped = executable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		return new RegExp(`(^|[^a-zA-Z0-9_.-])${escaped}(?=$|[\\s'"])`, "im").test(source);
 	}
 
 	private truncate(value: string, maxLength = 240): string {

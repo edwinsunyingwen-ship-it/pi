@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { MtclawSubagentRole } from "../../shared/types";
+import type { AgentProgressEvent, MtclawSubagentRole } from "../../shared/types";
 
 export interface SubagentDelegationRequest {
 	taskId: string;
@@ -27,6 +27,7 @@ export interface SubagentDelegationResult {
 		capabilityName?: string;
 		status: "success" | "failure";
 	}>;
+	progressEvents: AgentProgressEvent[];
 	limitations: string[];
 	errors: string[];
 	startedAt: string;

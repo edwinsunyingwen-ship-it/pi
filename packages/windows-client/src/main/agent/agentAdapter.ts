@@ -30,6 +30,9 @@ export interface DelegatableSubagent {
 export interface AgentStartOptions {
 	model: ModelProfileConfig | null;
 	cwd: string | null;
+	agentId?: string;
+	agentName?: string;
+	modelProfileId?: string;
 	capabilities?: CapabilityConfig[];
 	variables?: ClientVariableConfig[];
 	contextCompaction?: ContextCompactionConfig;
@@ -156,6 +159,10 @@ export class RpcAgentAdapter implements AgentAdapter {
 			id: crypto.randomUUID(),
 			startedAt: new Date().toISOString(),
 			state: "idle",
+			agentId: options.agentId,
+			agentName: options.agentName,
+			modelId: options.modelProfileId,
+			workspacePath: options.cwd,
 		};
 
 		const rpcProcess = await this.startRpcProcess(options, session.id);
@@ -1013,6 +1020,7 @@ export default function (pi) {
           subagentRole: result.role,
           subagentName: result.agentName,
           status: result.status,
+          subagentProgressEvents: result.progressEvents || [],
         },
       };
     },
@@ -1164,6 +1172,17 @@ function summarizeSnapshot(snapshot) {
   return lines.join("\\n");
 }
 
+function buildToolResult(snapshot) {
+  const capability = getCapability();
+  return {
+    content: [{ type: "text", text: summarizeSnapshot(snapshot) }],
+    details: {
+      capabilityId: capability?.id,
+      capabilityName: capability?.name,
+    },
+  };
+}
+
 async function callBrowserBridge(action, params, signal) {
   const response = await fetch(browserBridge.url, {
     method: "POST",
@@ -1207,7 +1226,7 @@ export default function (pi) {
     parameters: OpenParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("open", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1222,7 +1241,7 @@ export default function (pi) {
     parameters: ExtractParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("extract", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1238,7 +1257,7 @@ export default function (pi) {
     parameters: ClickParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("click", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1254,7 +1273,7 @@ export default function (pi) {
     parameters: TypeParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("type", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1267,7 +1286,7 @@ export default function (pi) {
     parameters: ScrollParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("scroll", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1280,7 +1299,7 @@ export default function (pi) {
     parameters: PressParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("press", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1293,7 +1312,7 @@ export default function (pi) {
     parameters: WaitParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("wait", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1305,7 +1324,7 @@ export default function (pi) {
     parameters: EmptyParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("back", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1317,7 +1336,7 @@ export default function (pi) {
     parameters: EmptyParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("reload", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 
@@ -1330,7 +1349,7 @@ export default function (pi) {
     parameters: SelectParams,
     async execute(_toolCallId, params, signal) {
       const snapshot = await callBrowserBridge("select", params, signal);
-      return { content: [{ type: "text", text: summarizeSnapshot(snapshot) }] };
+      return buildToolResult(snapshot);
     },
   });
 }
@@ -1410,10 +1429,6 @@ export default function (pi) {
 	}
 
 	private emitRpcProgress(state: RpcProcessSession, event: RpcEvent): void {
-		if (!state.progressHandler) {
-			return;
-		}
-
 		if (event.type === "agent_start") {
 			this.emitProgress(state, {
 				sessionId: state.session.id,
@@ -1461,10 +1476,11 @@ export default function (pi) {
 			return;
 		}
 		if (event.type === "tool_execution_end") {
+			const delegatedSummary = this.emitDelegatedSubagentProgress(state, event);
 			this.emitProgress(state, {
 				sessionId: state.session.id,
 				title: `工具完成：${event.toolName ?? "unknown-tool"}`,
-				detail: this.summarizeUnknown(event.result, 240),
+				detail: delegatedSummary ?? this.summarizeUnknown(event.result, 240),
 				status: event.isError ? "failure" : "success",
 			});
 			return;
@@ -1493,6 +1509,84 @@ export default function (pi) {
 				status: "success",
 			});
 		}
+	}
+
+	private emitDelegatedSubagentProgress(state: RpcProcessSession, event: RpcEvent): string | undefined {
+		if (event.toolName !== "delegate_to_subagent" || !this.isRecord(event.result)) {
+			return undefined;
+		}
+		const details = event.result.details;
+		if (!this.isRecord(details) || !Array.isArray(details.subagentProgressEvents)) {
+			return undefined;
+		}
+		const taskId = typeof details.taskId === "string" ? details.taskId : undefined;
+		const childSessionId = typeof details.childSessionId === "string" ? details.childSessionId : undefined;
+		const subagentRole = this.normalizeSubagentRole(details.subagentRole);
+		const subagentName = typeof details.subagentName === "string" ? details.subagentName : undefined;
+		const prefix = subagentName || subagentRole || "专业子智能体";
+		let emittedCount = 0;
+
+		for (const value of details.subagentProgressEvents) {
+			const progressEvent = this.normalizeDelegatedProgressEvent(value);
+			if (!progressEvent) {
+				continue;
+			}
+			this.emitProgress(state, {
+				sessionId: state.session.id,
+				timestamp: progressEvent.timestamp,
+				title: `子智能体 · ${prefix} · ${progressEvent.title}`,
+				detail: progressEvent.detail,
+				status: progressEvent.status,
+				durationMs: progressEvent.durationMs,
+				source: "subagent",
+				taskId,
+				childSessionId,
+				subagentRole,
+				subagentName,
+			});
+			emittedCount++;
+		}
+
+		return [
+			`子智能体“${prefix}”已返回 ${emittedCount} 个执行步骤。`,
+			taskId ? `任务 ID：${taskId}。` : "",
+			childSessionId ? `子会话 ID：${childSessionId}。` : "",
+		]
+			.filter(Boolean)
+			.join(" ");
+	}
+
+	private normalizeDelegatedProgressEvent(value: unknown): AgentProgressEvent | null {
+		if (!this.isRecord(value)) {
+			return null;
+		}
+		const status = value.status;
+		if (status !== "running" && status !== "success" && status !== "failure" && status !== "info") {
+			return null;
+		}
+		if (typeof value.title !== "string" || typeof value.timestamp !== "string") {
+			return null;
+		}
+		return {
+			id: typeof value.id === "string" ? value.id : crypto.randomUUID(),
+			sessionId: typeof value.sessionId === "string" ? value.sessionId : "",
+			timestamp: value.timestamp,
+			title: value.title,
+			detail: typeof value.detail === "string" ? value.detail : undefined,
+			status,
+			durationMs: typeof value.durationMs === "number" ? value.durationMs : undefined,
+		};
+	}
+
+	private normalizeSubagentRole(value: unknown): MtclawSubagentRole | undefined {
+		if (
+			value === "enterprise_due_diligence" ||
+			value === "legal_research" ||
+			value === "contract_counterparty_risk_review"
+		) {
+			return value;
+		}
+		return undefined;
 	}
 
 	private emitProgress(
