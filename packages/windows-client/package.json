@@ -1,6 +1,6 @@
 {
   "name": "@pi-agent/windows-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Staix desktop client for agent workflows.",
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "dist": "npm run build && electron-builder --win nsis --x64",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64"
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64",
+    "dist:mac:x64:unsigned": "npm run build && electron-builder --mac dmg --x64"
   },
   "build": {
     "appId": "com.staix.desktop",
@@ -125,6 +126,8 @@
       ]
     },
     "mac": {
+      "identity": null,
+      "hardenedRuntime": false,
       "target": [
         "dmg",
         "zip"
