@@ -1,0 +1,5 @@
+﻿upstream_repository=https://github.com/MooreThreads/MTClaw
+upstream_commit=861fe37a76a1c4a24fa9d29bfcef5956ef685ee3
+license=MIT
+vendored_for=HICOOL-2026-AI-Agent-Competition
+vendored_on=2026-08-03
