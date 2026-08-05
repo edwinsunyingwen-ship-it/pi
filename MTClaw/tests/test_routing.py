@@ -720,6 +720,118 @@ async def test_chat_delegated_error_continuation_falls_through_to_upstream(
 
 
 @pytest.mark.asyncio
+async def test_chat_delegated_continuation_blocks_repeated_delegation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server.STATE.config = make_temp_config(tmp_path)
+    server.STATE.tools = [tool_definition()]
+    server._SESSION_PENDING_DELEGATED_TOOL_IDS["resume-retry"] = {"call_1"}
+    logs = []
+    proxy_calls = []
+
+    async def fake_call_qwen(messages):
+        assert messages[-1]["role"] == "tool"
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [qwen_tool_call(call_id="call_2")],
+                    }
+                }
+            ]
+        }
+
+    async def fake_proxy_upstream(original_request, **kwargs):
+        proxy_calls.append((original_request, kwargs))
+        return server._build_completion_response("upstream handled retry")
+
+    monkeypatch.setattr(server, "call_qwen", fake_call_qwen)
+    monkeypatch.setattr(server, "proxy_upstream", fake_proxy_upstream)
+    monkeypatch.setattr(server, "log_request", lambda **kwargs: logs.append(kwargs))
+
+    response = await asgi_request(
+        "POST",
+        "/v1/chat/completions",
+        headers={"x-openclaw-session-key": "resume-retry"},
+        json={
+            "messages": [
+                {"role": "user", "content": "run custom"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [qwen_tool_call(arguments='{"x":1}')],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": '{"error":"boom"}'},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "upstream handled retry"
+    assert len(proxy_calls) == 1
+    assert proxy_calls[0][1]["tool_context"] is None
+    assert logs[-1]["status"] == "delegated_retry_blocked_to_upstream"
+    assert "resume-retry" not in server._SESSION_PENDING_DELEGATED_TOOL_IDS
+
+
+@pytest.mark.asyncio
+async def test_chat_no_tool_trace_exists_before_upstream_stream_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server.STATE.config = make_temp_config(tmp_path)
+    server.STATE.tools = [tool_definition()]
+    logs = []
+
+    async def fake_call_qwen(messages):
+        return {"choices": [{"message": {"content": "cannot handle"}}]}
+
+    async def fake_proxy_upstream(original_request, **kwargs):
+        matching_entries = [
+            entry
+            for entry in server.TOOL_HISTORY
+            if entry["session_key"] == "trace-before-stream-end"
+        ]
+        assert len(matching_entries) == 1
+        assert len(matching_entries[0]["llm_calls"]) == 1
+        kwargs["out_timing"].update(
+            {
+                "kind": "upstream_proxy",
+                "model": "upstream",
+                "request_timestamp": "2026-08-05T00:00:01+00:00",
+                "response_timestamp": "2026-08-05T00:00:02+00:00",
+            }
+        )
+        kwargs["on_stream_end"]()
+        return server._build_completion_response("upstream handled")
+
+    monkeypatch.setattr(server, "call_qwen", fake_call_qwen)
+    monkeypatch.setattr(server, "proxy_upstream", fake_proxy_upstream)
+    monkeypatch.setattr(server, "log_request", lambda **kwargs: logs.append(kwargs))
+
+    response = await asgi_request(
+        "POST",
+        "/v1/chat/completions",
+        headers={"x-openclaw-session-key": "trace-before-stream-end"},
+        json={"messages": [{"role": "user", "content": "plain question"}]},
+    )
+
+    matching_entries = [
+        entry
+        for entry in server.TOOL_HISTORY
+        if entry["session_key"] == "trace-before-stream-end"
+    ]
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "upstream handled"
+    assert len(matching_entries) == 1
+    assert len(matching_entries[0]["llm_calls"]) == 2
+    assert matching_entries[0]["llm_calls"][-1]["kind"] == "upstream_proxy"
+    assert logs[-1]["status"] == "forwarded_after_routing"
+
+
+@pytest.mark.asyncio
 async def test_trailing_tool_without_pending_id_keeps_existing_continuation_skip(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

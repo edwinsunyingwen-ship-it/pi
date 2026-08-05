@@ -158,6 +158,7 @@ export class AgentService {
 		if (onProgress) {
 			this.liveProgressHandlers.set(sessionId, onProgress);
 		}
+		const routerRequestStartedAt = new Date().toISOString();
 
 		try {
 			const result = await this.adapter.sendUserMessage(sessionId, message, images, onProgress);
@@ -165,7 +166,12 @@ export class AgentService {
 			result.capabilityCalls = await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
 			const configState = await this.configService.getConfig();
 			if (configState.config.mtclawRouter.enabled) {
-				const routerEvent = await this.captureMtclawRouterTrace(sessionId, configState.config.mtclawRouter);
+				const routerEvent = await this.captureMtclawRouterTrace(
+					sessionId,
+					message,
+					routerRequestStartedAt,
+					configState.config.mtclawRouter,
+				);
 				onProgress?.(routerEvent);
 				result.progressEvents = [...(result.progressEvents ?? []), routerEvent];
 			}
@@ -979,14 +985,36 @@ export class AgentService {
 		return this.isRecord(value) && Array.isArray(value.tools) ? value.tools.length : 0;
 	}
 
-	private async captureMtclawRouterTrace(sessionId: string, router: MtclawRouterConfig): Promise<AgentProgressEvent> {
+	private async captureMtclawRouterTrace(
+		sessionId: string,
+		userMessage: string,
+		requestStartedAt: string,
+		router: MtclawRouterConfig,
+	): Promise<AgentProgressEvent> {
 		const timestamp = new Date().toISOString();
 		try {
 			const history = await this.fetchMtclawRouterJson(router, "/v1/tool_history?limit=20");
 			const entries = this.isRecord(history) && Array.isArray(history.entries) ? history.entries : [];
-			const entry = entries.find(
-				(item) => this.isRecord(item) && this.getStringProperty(item, "session_key") === sessionId,
+			const requestStartedAtMs = Date.parse(requestStartedAt);
+			const exactSessionEntry = entries.find(
+				(item) =>
+					this.isRecord(item) &&
+					this.getStringProperty(item, "session_key") === sessionId &&
+					Date.parse(this.getStringProperty(item, "timestamp")) >= requestStartedAtMs,
 			);
+			const matchingRequestEntries = entries
+				.filter(
+					(item) =>
+						this.isRecord(item) &&
+						this.getStringProperty(item, "user_message") === userMessage &&
+						Date.parse(this.getStringProperty(item, "timestamp")) >= requestStartedAtMs,
+				)
+				.sort(
+					(left, right) =>
+						Date.parse(this.getStringProperty(right, "timestamp")) -
+						Date.parse(this.getStringProperty(left, "timestamp")),
+				);
+			const entry = exactSessionEntry ?? matchingRequestEntries[0];
 			if (!entry || !this.isRecord(entry)) {
 				const detail = "请求已由 pi-agent 发送到 MTClaw，但 Router 尚未返回对应会话的追踪记录。";
 				await this.writeAudit({

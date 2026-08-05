@@ -1961,7 +1961,7 @@ def _record_tool_history(
     tool_rounds: int,
     session_key: str,
     llm_calls: list[dict[str, Any]] | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     """Parse tool_context (OpenAI messages) and append to TOOL_HISTORY ring buffer.
 
     *llm_calls* carries per-LLM-call timing records (FR Qwen rounds, completion
@@ -2026,7 +2026,7 @@ def _record_tool_history(
             })
 
     if not tool_calls and not tool_results and not llm_calls:
-        return
+        return None
 
     def _ev_sort_key(ev: dict[str, Any]) -> str:
         return ev.get("request_timestamp") or ev.get("timestamp") or ""
@@ -2034,7 +2034,7 @@ def _record_tool_history(
     ordered_events.sort(key=_ev_sort_key)
 
     entry_timestamp = ordered_events[-1].get("timestamp") or ordered_events[-1].get("response_timestamp") or now_iso()
-    TOOL_HISTORY.append({
+    entry = {
         "timestamp": entry_timestamp,
         "session_key": session_key,
         "user_message": user_message or "",
@@ -2043,7 +2043,29 @@ def _record_tool_history(
         "ordered_events": ordered_events,
         "tool_rounds": tool_rounds,
         "llm_calls": list(llm_calls or []),
-    })
+    }
+    TOOL_HISTORY.append(entry)
+    return entry
+
+
+def _append_llm_call_to_tool_history(
+    entry: dict[str, Any] | None,
+    llm_call: dict[str, Any],
+) -> None:
+    """Append one late streaming LLM timing record to an existing history entry."""
+
+    if entry is None or not llm_call:
+        return
+    entry["llm_calls"].append(llm_call)
+    entry["ordered_events"].append({"type": "llm_call", **llm_call})
+    entry["ordered_events"].sort(
+        key=lambda event: event.get("request_timestamp") or event.get("timestamp") or ""
+    )
+    entry["timestamp"] = (
+        llm_call.get("response_timestamp")
+        or llm_call.get("request_timestamp")
+        or entry["timestamp"]
+    )
 
 
 app = FastAPI(title="Function Router", version="1.0.0")
@@ -2465,16 +2487,18 @@ async def chat_completions(request: Request) -> StreamingResponse:
             _after_routing_rounds = tool_rounds
             _after_routing_tool_context = result.tool_context
             _after_routing_llm_calls = result.llm_calls
+            _after_routing_history_entry = _record_tool_history(
+                _user_text_after_routing,
+                _after_routing_tool_context,
+                _after_routing_rounds,
+                session_key,
+                llm_calls=_after_routing_llm_calls,
+            )
 
             def _finalize_after_routing() -> None:
-                if upstream_timing:
-                    _after_routing_llm_calls.append(upstream_timing)
-                _record_tool_history(
-                    _user_text_after_routing,
-                    _after_routing_tool_context,
-                    _after_routing_rounds,
-                    session_key,
-                    llm_calls=_after_routing_llm_calls,
+                _append_llm_call_to_tool_history(
+                    _after_routing_history_entry,
+                    upstream_timing,
                 )
 
             response = await proxy_upstream(
@@ -2502,6 +2526,50 @@ async def chat_completions(request: Request) -> StreamingResponse:
             )
             return response
         if result.delegated_tool_calls:
+            if delegated_continuation is not None:
+                if not ctx_preserve:
+                    _clear_saved_context(session_key)
+                upstream_timing: dict[str, Any] = {}
+                _user_text_retry_blocked = user_text
+                _retry_blocked_tool_context = delegated_continuation[0]
+                _retry_blocked_llm_calls = result.llm_calls
+
+                def _finalize_delegated_retry_blocked() -> None:
+                    if upstream_timing:
+                        _retry_blocked_llm_calls.append(upstream_timing)
+                    _record_tool_history(
+                        _user_text_retry_blocked,
+                        _retry_blocked_tool_context,
+                        tool_rounds,
+                        session_key,
+                        llm_calls=_retry_blocked_llm_calls,
+                    )
+
+                response = await proxy_upstream(
+                    original_request,
+                    tool_context=None,
+                    session_key=session_key,
+                    out_timing=upstream_timing,
+                    on_stream_end=_finalize_delegated_retry_blocked,
+                )
+                log_request(
+                    user_message=user_text,
+                    route="upstream",
+                    function_name=function_name,
+                    tool_rounds=tool_rounds,
+                    latency_ms=(time.perf_counter() - started_at) * 1000,
+                    status="delegated_retry_blocked_to_upstream",
+                )
+                _debug_log(
+                    "route_decision",
+                    session_key=session_key,
+                    route="upstream",
+                    status="delegated_retry_blocked_to_upstream",
+                    function_name=function_name,
+                    tool_rounds=tool_rounds,
+                    latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
+                )
+                return response
             _mark_pending_delegated_tool_calls(session_key, result.delegated_tool_calls)
             log_request(
                 user_message=user_text,

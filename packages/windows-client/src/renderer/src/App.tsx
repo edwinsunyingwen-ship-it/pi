@@ -735,6 +735,17 @@ function createCapabilityConfig(): CapabilityConfig {
   };
 }
 
+function mergeDiscoveredMcpTools(
+  currentTools: CapabilityConfig['mcpTools'],
+  discoveredTools: CapabilityConfig['mcpTools'],
+): CapabilityConfig['mcpTools'] {
+  const enabledByName = new Map(currentTools.map((tool) => [tool.name, tool.enabled]));
+  return discoveredTools.map((tool) => ({
+    ...tool,
+    enabled: enabledByName.get(tool.name) ?? tool.enabled,
+  }));
+}
+
 function createAgentConfig(): AgentConfig {
   return {
     id: crypto.randomUUID(),
@@ -3245,6 +3256,22 @@ function App(): ReactElement {
   }
 
   async function testCapabilityConnection(capability: CapabilityConfig): Promise<void> {
+    if (capability.type === 'mcp') {
+      setStatusText(`正在测试 MCP 联通：${capability.name}`);
+      const result = await window.windowsClient.discoverMcpTools(capability);
+      const testedCapability: CapabilityConfig = {
+        ...capability,
+        mcpTools:
+          result.status === 'success' ? mergeDiscoveredMcpTools(capability.mcpTools, result.tools) : capability.mcpTools,
+        connectionStatus: result.status,
+        lastTestedAt: result.testedAt,
+      };
+      await saveCapabilityConfig(testedCapability);
+      setConfigNotice({ tone: result.status === 'success' ? 'success' : 'error', text: result.message });
+      setStatusText(result.message);
+      return;
+    }
+
     const hasTarget = Boolean(capability.content.trim() || capability.endpoint.trim() || capability.command.trim());
     const testedCapability: CapabilityConfig = {
       ...capability,
@@ -3509,7 +3536,7 @@ function App(): ReactElement {
       current && current.id === capability.id
         ? {
             ...current,
-            mcpTools: result.tools,
+            mcpTools: mergeDiscoveredMcpTools(current.mcpTools, result.tools),
             connectionStatus: result.status,
             lastTestedAt: new Date().toISOString(),
           }
@@ -7391,6 +7418,32 @@ function App(): ReactElement {
                       placeholder="http://127.0.0.1:3000/mcp"
                     />
                   </label>
+                  <label>
+                    <span>MCP 认证方式</span>
+                    <select
+                      value={capabilityEditor.mcpAuthType}
+                      onChange={(event) =>
+                        updateCapabilityEditor('mcpAuthType', event.target.value as CapabilityConfig['mcpAuthType'])
+                      }
+                    >
+                      <option value="none">无需认证</option>
+                      <option value="bearer">Bearer Token</option>
+                    </select>
+                  </label>
+                  {capabilityEditor.mcpAuthType === 'bearer' && (
+                    <label>
+                      <span>API Key / Token</span>
+                      <input
+                        type="password"
+                        value={capabilityEditor.mcpApiKeyValue}
+                        onChange={(event) => updateCapabilityEditor('mcpApiKeyValue', event.target.value)}
+                        placeholder="粘贴 MCP 服务的 API Key 或 Token"
+                      />
+                      <small className="field-hint">
+                        已保存：{maskSecret(capabilityEditor.mcpApiKeyValue)}。请求时自动发送 Authorization: Bearer。
+                      </small>
+                    </label>
+                  )}
                   <label className="wide-field">
                     <span>MCP Headers JSON</span>
                     <textarea

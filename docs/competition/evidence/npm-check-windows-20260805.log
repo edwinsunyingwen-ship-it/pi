@@ -1,0 +1,23 @@
+
+> pi-monorepo@0.0.3 check
+> biome check --write --error-on-warnings . && tsgo --noEmit && npm run windows:typecheck && npm run check:browser-smoke && cd packages/web-ui && npm run check
+
+Checked 670 files in 1165ms. No fixes applied.
+
+> pi-monorepo@0.0.3 windows:typecheck
+> npm --workspace @pi-agent/windows-client run typecheck
+
+
+> @pi-agent/windows-client@1.0.0 typecheck
+> tsc --noEmit
+
+
+> pi-monorepo@0.0.3 check:browser-smoke
+> node scripts/check-browser-smoke.mjs
+
+
+> @earendil-works/pi-web-ui@0.74.0 check
+> biome check --write --error-on-warnings . && tsc --noEmit && cd example && biome check --write --error-on-warnings . && tsc --noEmit
+
+Checked 73 files in 107ms. No fixes applied.
+Checked 3 files in 23ms. No fixes applied.
