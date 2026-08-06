@@ -2474,7 +2474,7 @@ async def chat_completions(request: Request) -> StreamingResponse:
                     function_name=function_name,
                     tool_rounds=tool_rounds,
                     latency_ms=(time.perf_counter() - started_at) * 1000,
-                    status="qwen_completed_always_true",
+                    status="routing_model_completed_always_true",
                 )
                 return _build_completion_response(
                     result.qwen_reply or _last_assistant_text(result._loop_messages),
@@ -2592,7 +2592,7 @@ async def chat_completions(request: Request) -> StreamingResponse:
                 result.delegated_tool_calls,
                 stream=original_request.get("stream", False),
             )
-        # Tools were used — check if Qwen judges the task complete (short-circuit)
+        # Tools were used — check if the routing model judges the task complete (short-circuit)
         # or fall through to upstream (Doubao) for the final response.
         if (
             STATE.config
@@ -2630,13 +2630,13 @@ async def chat_completions(request: Request) -> StreamingResponse:
                     function_name=function_name,
                     tool_rounds=tool_rounds,
                     latency_ms=(time.perf_counter() - started_at) * 1000,
-                    status="qwen_completed",
+                    status="routing_model_completed",
                 )
                 _debug_log(
                     "route_decision",
                     session_key=session_key,
                     route="function",
-                    status="qwen_completed",
+                    status="routing_model_completed",
                     function_name=function_name,
                     tool_rounds=tool_rounds,
                     latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
@@ -2664,7 +2664,7 @@ async def chat_completions(request: Request) -> StreamingResponse:
                 function_name=function_name,
                 tool_rounds=tool_rounds,
                 latency_ms=(time.perf_counter() - started_at) * 1000,
-                status="qwen_completed_always_true",
+                status="routing_model_completed_always_true",
             )
             return _build_completion_response(
                 result.qwen_reply or _last_assistant_text(result._loop_messages),

@@ -978,6 +978,10 @@ export class AgentService {
 		return this.isRecord(value) && typeof value[key] === "string" ? value[key] : "";
 	}
 
+	private normalizeMtclawTraceMessage(value: string): string {
+		return value.replace(/\s+/g, " ").trim();
+	}
+
 	private getMtclawToolCount(value: unknown): number {
 		if (Array.isArray(value)) {
 			return value.length;
@@ -996,6 +1000,7 @@ export class AgentService {
 			const history = await this.fetchMtclawRouterJson(router, "/v1/tool_history?limit=20");
 			const entries = this.isRecord(history) && Array.isArray(history.entries) ? history.entries : [];
 			const requestStartedAtMs = Date.parse(requestStartedAt);
+			const normalizedUserMessage = this.normalizeMtclawTraceMessage(userMessage);
 			const exactSessionEntry = entries.find(
 				(item) =>
 					this.isRecord(item) &&
@@ -1006,7 +1011,8 @@ export class AgentService {
 				.filter(
 					(item) =>
 						this.isRecord(item) &&
-						this.getStringProperty(item, "user_message") === userMessage &&
+						this.normalizeMtclawTraceMessage(this.getStringProperty(item, "user_message")) ===
+							normalizedUserMessage &&
 						Date.parse(this.getStringProperty(item, "timestamp")) >= requestStartedAtMs,
 				)
 				.sort(

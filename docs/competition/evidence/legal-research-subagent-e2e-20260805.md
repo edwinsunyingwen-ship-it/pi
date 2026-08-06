@@ -23,7 +23,8 @@ Observed result:
 - The final answer included Civil Code Article 496 and one identified judgment
 - End-to-end duration: 69 seconds
 - Router session key: `019fcf39-0c2d-7658-a224-03583e4f9500`
-- Router statuses: `delegated_tool_call`, followed by `qwen_completed`
+- Router statuses at capture time: `delegated_tool_call`, followed by the legacy status name `qwen_completed`
+- The public legacy status name was renamed to `routing_model_completed` and reverified on 2026-08-06
 - Repeated delegation was not observed
 
 ## Repeat-delegation protection

@@ -622,7 +622,7 @@ async def test_chat_delegated_first_turn_streams_tool_calls(
 
 
 @pytest.mark.asyncio
-async def test_chat_delegated_continuation_resumes_to_qwen_completed(
+async def test_chat_delegated_continuation_resumes_to_routing_model_completed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -665,7 +665,7 @@ async def test_chat_delegated_continuation_resumes_to_qwen_completed(
     choice = response.json()["choices"][0]
     assert choice["message"]["content"] == "完成了"
     assert choice["finish_reason"] == "stop"
-    assert logs[-1]["status"] == "qwen_completed"
+    assert logs[-1]["status"] == "routing_model_completed"
     assert "resume-ok" in server._QWEN_SAVED_CONTEXTS
     assert "resume-ok" not in server._SESSION_PENDING_DELEGATED_TOOL_IDS
     # OpenClaw already persists the delegated turn natively; queueing a pending
