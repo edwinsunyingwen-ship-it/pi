@@ -929,6 +929,22 @@ p {
   min-width: 0;
 }
 
+.select-action-row {
+  align-items: stretch;
+  display: flex;
+  gap: 8px;
+}
+
+.select-action-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.select-action-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .hidden-file-input {
   display: none;
 }

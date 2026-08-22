@@ -63,14 +63,19 @@ export class AgentService {
 			(item) =>
 				item.id !== agent.id && (agent.childAgentIds.includes(item.id) || item.parentAgentIds.includes(agent.id)),
 		);
-		const delegatableSubagents = childAgents
-			.filter(
-				(item) =>
-					item.enabled &&
-					item.type === "sub" &&
-					item.mtclawRole !== null &&
-					(!configState.config.mtclawRouter.enabled || item.mtclawRoutingEnabled),
-			)
+		const enabledRoleIds = new Set(
+			configState.config.subagentRoles.filter((role) => role.enabled).map((role) => role.id),
+		);
+		const delegatableChildAgents = childAgents.filter(
+			(item) =>
+				item.enabled &&
+				item.type === "sub" &&
+				item.mtclawRole !== null &&
+				enabledRoleIds.has(item.mtclawRole) &&
+				(!configState.config.mtclawRouter.enabled || item.mtclawRoutingEnabled),
+		);
+		const delegatableSubagents = delegatableChildAgents
+			.filter((item) => item.mtclawRole !== null)
 			.map((item) => ({
 				role: item.mtclawRole as NonNullable<typeof item.mtclawRole>,
 				name: item.name,
@@ -91,7 +96,7 @@ export class AgentService {
 				agent,
 				model,
 				enabledCapabilities,
-				childAgents,
+				delegatableChildAgents,
 				effectiveWorkspacePath,
 			),
 			subagentDelegation:
@@ -213,10 +218,14 @@ export class AgentService {
 		if (!caller) {
 			throw new Error("Subagent delegation caller is not an enabled Staix agent.");
 		}
+		const enabledRoleIds = new Set(
+			configState.config.subagentRoles.filter((role) => role.enabled).map((role) => role.id),
+		);
 		const subagent = configState.config.agents.find(
 			(item) =>
 				item.enabled &&
 				item.type === "sub" &&
+				enabledRoleIds.has(request.role) &&
 				(!configState.config.mtclawRouter.enabled || item.mtclawRoutingEnabled) &&
 				item.mtclawRole === request.role &&
 				(caller.childAgentIds.includes(item.id) || item.parentAgentIds.includes(caller.id)),
@@ -258,7 +267,7 @@ export class AgentService {
 		await this.writeAudit({
 			sessionId: request.parentSessionId,
 			businessAction: "delegate-subagent-start",
-			inputSummary: `${request.role}：${this.truncate(request.objective)}`,
+			inputSummary: `${request.role} / ${request.planStepId}：${this.truncate(request.objective)}`,
 			fullInput: request.objective,
 			outputSummary: `准备由 pi-agent 子智能体“${subagent.name}”执行任务 ${request.taskId}。`,
 			status: "success",
@@ -285,6 +294,8 @@ export class AgentService {
 						"- 这是由主智能体委托并由 pi-agent 隔离 Runtime 执行的专业子任务。",
 						"- 根据任务需要自主选择已绑定工具；不要把一次工具调用冒充为完整子智能体执行。",
 						"- 输出可复核的事实、来源、判断、限制和错误；不得编造未查询到的数据。",
+						"- 同一主会话中的历史委托结果保存在当前子会话上下文中；直接引用已有内容，不要编造 internal.staix.cn/task 或其他不存在的任务链接。",
+						"- 只有工具真实返回的 URL、本地路径或用户提供的地址才可以作为可访问引用。",
 					].join("\n"),
 					isolated: true,
 				});
@@ -1320,7 +1331,11 @@ export class AgentService {
 			"## 工作方式补充",
 			"- 使用中文与用户沟通，除非用户明确要求其他语言。",
 			"- 回答时优先围绕当前智能体职责、当前工作区和用户明确选择的上下文。",
-			"- 如果任务适合专业子智能体，只有在实际调用 delegate_to_subagent 并收到结构化结果后，才可以声称已经完成子任务调度。",
+			"- 对多步骤任务或需要子智能体的任务，必须先调用 update_task_plan 创建全局计划；范围、证据或结论发生变化时再次调用它修订计划。",
+			"- 调用 delegate_to_subagent 时必须绑定真实的 planStepId；只有收到结构化结果后，才可以声称已经完成该子任务调度。",
+			"- 计划中的每个步骤应分配给职责最匹配的已配置角色；不要仅因某个角色可用，就把解析、比对、撰写和复核全部伪装成同一种专业分工。",
+			"- 同一角色的后续委托会复用同一个子智能体会话；不要把多次委托描述成多个不同子智能体协作。",
+			"- 只能引用真实存在的本地路径、用户提供的 URL 或工具实际返回的地址；不得编造 internal.staix.cn/task 等任务链接。",
 		].join("\n");
 	}
 
@@ -1404,7 +1419,9 @@ export class AgentService {
 			return lines;
 		}
 		for (const childAgent of childAgents) {
-			lines.push(`- ${childAgent.name}：${childAgent.description || "未填写描述"}`);
+			lines.push(
+				`- ${childAgent.name}（角色：${childAgent.mtclawRole || "未配置"}）：${childAgent.description || "未填写描述"}`,
+			);
 		}
 		return lines;
 	}

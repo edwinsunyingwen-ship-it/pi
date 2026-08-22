@@ -14,6 +14,7 @@ import type {
 	ModelProfileConfig,
 	MtclawRouterConfig,
 	MtclawSubagentRole,
+	SubagentRoleConfig,
 } from "../../shared/types";
 import type { AuditLogger } from "./auditLogger";
 
@@ -158,6 +159,33 @@ export class ConfigService {
 		return { configPath: this.configPath, config: nextConfig };
 	}
 
+	async saveSubagentRoles(roles: SubagentRoleConfig[]): Promise<ClientConfigState> {
+		const current = await this.getConfig();
+		const normalizedRoles = this.normalizeSubagentRoles(roles, []);
+		if (normalizedRoles.length !== roles.length) {
+			throw new Error("专业角色标识必须唯一，并且只能包含英文小写字母、数字、下划线或连字符。");
+		}
+		const knownRoleIds = new Set(normalizedRoles.map((role) => role.id));
+		const referencedAgent = current.config.agents.find(
+			(agent) => agent.mtclawRole && !knownRoleIds.has(agent.mtclawRole),
+		);
+		if (referencedAgent) {
+			throw new Error(`专业角色仍由智能体“${referencedAgent.name}”使用，请先调整该智能体。`);
+		}
+		const nextConfig = this.mergeWithDefaults({
+			...current.config,
+			subagentRoles: normalizedRoles,
+			updatedAt: new Date().toISOString(),
+		});
+		await this.writeConfig(
+			nextConfig,
+			true,
+			"save-subagent-roles",
+			`保存 ${normalizedRoles.length} 个可维护专业角色。`,
+		);
+		return { configPath: this.configPath, config: nextConfig };
+	}
+
 	async deleteCapabilityConfig(id: string): Promise<ClientConfigState> {
 		const current = await this.getConfig();
 		const capability = current.config.capabilities.find((item) => item.id === id);
@@ -181,6 +209,7 @@ export class ConfigService {
 			sourceAgents,
 			current.config.model.models,
 			current.config.capabilities,
+			current.config.subagentRoles,
 		);
 		const agents = this.synchronizeChangedAgentRelationships(normalizedAgents, agent.id);
 		const normalizedAgent = agents.find((item) => item.id === agent.id) ?? agents[0];
@@ -366,6 +395,7 @@ export class ConfigService {
 					notes: "",
 				},
 			],
+			subagentRoles: this.createDefaultSubagentRoles(),
 			agents: [
 				{
 					id: "default-agent",
@@ -408,8 +438,9 @@ export class ConfigService {
 			legacyEnterpriseApiBaseUrl,
 			defaultConfig.capabilities,
 		);
+		const subagentRoles = this.normalizeSubagentRoles(config.subagentRoles, defaultConfig.subagentRoles);
 		const agents = this.ensureBidirectionalAgentRelationships(
-			this.normalizeAgents(config.agents, model.models, capabilities),
+			this.normalizeAgents(config.agents, model.models, capabilities, subagentRoles),
 		);
 		return {
 			agentCore: this.normalizeAgentCore(
@@ -423,6 +454,7 @@ export class ConfigService {
 			variables: this.normalizeVariables(config.variables),
 			model: this.applyModelUsage(model, agents),
 			capabilities: this.applyCapabilityUsage(capabilities, agents),
+			subagentRoles,
 			agents,
 			defaultAgentId:
 				config.defaultAgentId && agents.some((agent) => agent.id === config.defaultAgentId)
@@ -749,18 +781,46 @@ export class ConfigService {
 		return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
 	}
 
-	private normalizeMtclawSubagentRole(value: MtclawSubagentRole | null | undefined): MtclawSubagentRole | null {
-		switch (value) {
-			case "enterprise_due_diligence":
-			case "legal_research":
-			case "civil_litigation_document_generation":
-				return value;
-			default:
-				return null;
-		}
+	private normalizeSubagentRoles(
+		roles: SubagentRoleConfig[] | undefined,
+		fallback: SubagentRoleConfig[],
+	): SubagentRoleConfig[] {
+		const source = roles === undefined ? fallback : roles;
+		const seenIds = new Set<string>();
+		return source
+			.map((role) => ({
+				id: role.id.trim(),
+				name: role.name.trim(),
+				description: role.description.trim(),
+				enabled: role.enabled ?? true,
+			}))
+			.filter((role) => {
+				if (!/^[a-z][a-z0-9_-]{1,63}$/.test(role.id) || !role.name || seenIds.has(role.id)) {
+					return false;
+				}
+				seenIds.add(role.id);
+				return true;
+			});
+	}
+
+	private normalizeMtclawSubagentRole(
+		value: MtclawSubagentRole | null | undefined,
+		roles: SubagentRoleConfig[],
+	): MtclawSubagentRole | null {
+		const role = value?.trim() ?? "";
+		return role && roles.some((item) => item.id === role) ? role : null;
 	}
 
 	private assertValidMtclawSubagent(agent: AgentConfig, agents: AgentConfig[]): void {
+		if (agent.type === "sub" && !agent.mtclawRole) {
+			throw new Error("子智能体必须选择一个已配置的专业角色。");
+		}
+		const conflictingAgent = agents.find(
+			(item) => item.id !== agent.id && item.enabled && item.type === "sub" && item.mtclawRole === agent.mtclawRole,
+		);
+		if (agent.enabled && agent.mtclawRole && conflictingAgent) {
+			throw new Error(`专业角色已由智能体“${conflictingAgent.name}”启用。`);
+		}
 		if (!agent.mtclawRoutingEnabled) {
 			return;
 		}
@@ -776,20 +836,13 @@ export class ConfigService {
 		if (!agent.defaultModelId) {
 			throw new Error("MTClaw 专业子智能体必须配置默认模型。");
 		}
-
-		const conflictingAgent = agents.find(
-			(item) =>
-				item.id !== agent.id && item.enabled && item.mtclawRoutingEnabled && item.mtclawRole === agent.mtclawRole,
-		);
-		if (agent.enabled && conflictingAgent) {
-			throw new Error(`专业角色已由智能体“${conflictingAgent.name}”启用。`);
-		}
 	}
 
 	private normalizeAgents(
 		agents: AgentConfig[] | undefined,
 		models: ModelProfileConfig[],
 		capabilities: CapabilityConfig[],
+		subagentRoles: SubagentRoleConfig[],
 	): AgentConfig[] {
 		const modelIds = new Set(models.map((model) => model.id));
 		const capabilityIds = new Set(capabilities.map((capability) => capability.id));
@@ -831,7 +884,7 @@ export class ConfigService {
 					? agent.defaultModelId
 					: (validModelIds[0] ?? null);
 			const type = agent.type === "sub" ? "sub" : "primary";
-			const mtclawRole = type === "sub" ? this.normalizeMtclawSubagentRole(agent.mtclawRole) : null;
+			const mtclawRole = type === "sub" ? this.normalizeMtclawSubagentRole(agent.mtclawRole, subagentRoles) : null;
 			return {
 				id: agent.id || crypto.randomUUID(),
 				name: agent.name || "未命名智能体",
@@ -946,6 +999,29 @@ export class ConfigService {
 			constraints: "",
 			terminology: "",
 		};
+	}
+
+	private createDefaultSubagentRoles(): SubagentRoleConfig[] {
+		return [
+			{
+				id: "enterprise_due_diligence",
+				name: "企业主体核验与风险尽调",
+				description: "企业身份核验、经营风险和尽职调查。",
+				enabled: true,
+			},
+			{
+				id: "legal_research",
+				name: "法规和类案研究",
+				description: "法规检索、类案研究和法律依据分析。",
+				enabled: true,
+			},
+			{
+				id: "civil_litigation_document_generation",
+				name: "民事诉讼文书生成",
+				description: "民事起诉、答辩和诉讼文书生成。",
+				enabled: true,
+			},
+		];
 	}
 
 	private applyModelUsage(model: ModelConfig, agents: AgentConfig[]): ModelConfig {

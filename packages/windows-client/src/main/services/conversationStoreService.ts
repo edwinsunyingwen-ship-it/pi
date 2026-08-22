@@ -4,6 +4,7 @@ import { app } from "electron";
 import type {
 	AgentProgressEvent,
 	AgentProgressEventStatus,
+	AgentTaskPlan,
 	ConversationAttachmentMeta,
 	ConversationStoreState,
 	ConversationTranscriptItem,
@@ -183,6 +184,7 @@ export class ConversationStoreService {
 			return null;
 		}
 
+		const source = value.source === "main" || value.source === "subagent" ? value.source : undefined;
 		return {
 			id: value.id,
 			sessionId: value.sessionId,
@@ -192,6 +194,47 @@ export class ConversationStoreService {
 			status,
 			durationMs:
 				typeof value.durationMs === "number" && Number.isFinite(value.durationMs) ? value.durationMs : undefined,
+			source,
+			taskId: typeof value.taskId === "string" ? value.taskId : undefined,
+			childSessionId: typeof value.childSessionId === "string" ? value.childSessionId : undefined,
+			subagentRole: typeof value.subagentRole === "string" ? value.subagentRole : undefined,
+			subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
+			taskPlan: this.normalizeTaskPlan(value.taskPlan),
+		};
+	}
+
+	private normalizeTaskPlan(value: unknown): AgentTaskPlan | undefined {
+		if (!this.isRecord(value) || !Array.isArray(value.steps)) {
+			return undefined;
+		}
+		const steps: AgentTaskPlan["steps"] = value.steps.flatMap((step): AgentTaskPlan["steps"] => {
+			if (!this.isRecord(step) || typeof step.id !== "string" || typeof step.title !== "string") {
+				return [];
+			}
+			const status = step.status;
+			if (status !== "pending" && status !== "in_progress" && status !== "completed" && status !== "failed") {
+				return [];
+			}
+			return [
+				{
+					id: step.id,
+					title: step.title,
+					status,
+					subagentRole: typeof step.subagentRole === "string" ? step.subagentRole : undefined,
+					subagentName: typeof step.subagentName === "string" ? step.subagentName : undefined,
+					note: typeof step.note === "string" ? step.note : undefined,
+				},
+			];
+		});
+		if (steps.length === 0 || typeof value.objective !== "string" || typeof value.updatedAt !== "string") {
+			return undefined;
+		}
+		return {
+			version: typeof value.version === "number" ? value.version : 1,
+			objective: value.objective,
+			revisionReason: typeof value.revisionReason === "string" ? value.revisionReason : "",
+			updatedAt: value.updatedAt,
+			steps,
 		};
 	}
 

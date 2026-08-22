@@ -13,6 +13,7 @@ import type {
 	AgentModelInteractionLog,
 	AgentProgressEvent,
 	AgentSession,
+	AgentTaskPlan,
 	AgentToolInfo,
 	CapabilityConfig,
 	ClientVariableConfig,
@@ -980,14 +981,49 @@ export default function (pi) {
 const parentSessionId = ${JSON.stringify(parentSessionId)};
 const callerAgentId = ${JSON.stringify(delegation.callerAgentId)};
 const delegatableAgents = ${JSON.stringify(delegation.agents, null, 2)};
+let currentPlan = null;
 
-const Params = {
+const PlanParams = {
+  type: "object",
+  properties: {
+    objective: { type: "string", minLength: 1, description: "The overall user objective." },
+    revisionReason: {
+      type: "string",
+      description: "Why this plan was created or revised. State new evidence, scope changes, or blockers explicitly.",
+    },
+    steps: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", minLength: 1, description: "Stable step id reused across plan revisions." },
+          title: { type: "string", minLength: 1 },
+          status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] },
+          subagentRole: { type: "string", enum: delegatableAgents.map((agent) => agent.role) },
+          note: { type: "string" },
+        },
+        required: ["id", "title", "status"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["objective", "steps"],
+  additionalProperties: false,
+};
+
+const DelegationParams = {
   type: "object",
   properties: {
     role: {
       type: "string",
       enum: delegatableAgents.map((agent) => agent.role),
       description: "Stable Staix professional subagent role.",
+    },
+    planStepId: {
+      type: "string",
+      minLength: 1,
+      description: "Existing step id from update_task_plan that this delegation executes.",
     },
     objective: {
       type: "string",
@@ -996,10 +1032,10 @@ const Params = {
     },
     context: {
       type: "string",
-      description: "Optional facts, constraints, or document references needed by the delegated task.",
+      description: "Optional real facts, local paths, or user-provided URLs needed by the delegated task. Never invent task URLs.",
     },
   },
-  required: ["role", "objective"],
+  required: ["role", "planStepId", "objective"],
   additionalProperties: false,
 };
 
@@ -1011,47 +1047,129 @@ function buildDescription() {
     "Delegate a complete professional task to a configured Staix subagent.",
     "This is a subagent task delegation boundary, not an atomic business data tool.",
     "The child pi-agent runtime dynamically loads the selected subagent's model, rules, knowledge, skills, and assigned capabilities.",
+    "Repeated calls for the same role reuse one child session; they are not separate subagents.",
     roles,
   ].join("\\n");
 }
 
 export default function (pi) {
   pi.registerTool({
+    name: "update_task_plan",
+    label: "Create or revise global task plan",
+    description: "Create the initial global plan before a multi-step task, or revise it when evidence, scope, blockers, or conclusions change.",
+    promptSnippet: "update_task_plan: create and revise the visible global execution plan before delegating work.",
+    promptGuidelines: [
+      "Call this before the first delegate_to_subagent call.",
+			"Keep stable step ids across revisions and explain every revision in revisionReason.",
+			"Assign each delegated step to the best matching configured role; do not disguise unrelated work as one professional role.",
+      "Use only configured subagent roles. Do not invent task URLs or persisted result references.",
+    ],
+    parameters: PlanParams,
+    async execute(_toolCallId, params) {
+      const seenStepIds = new Set();
+      const steps = params.steps.map((step) => {
+        const id = String(step.id || "").trim();
+        const title = String(step.title || "").trim();
+        if (!id || !title || seenStepIds.has(id)) {
+          throw new Error("Task plan step ids and titles must be non-empty, and step ids must be unique.");
+        }
+        if (step.subagentRole && !delegatableAgents.some((agent) => agent.role === step.subagentRole)) {
+          throw new Error(\`Task plan references an unavailable subagent role: \${String(step.subagentRole)}\`);
+        }
+        seenStepIds.add(id);
+        return {
+          id,
+          title,
+          status: step.status,
+          subagentRole: step.subagentRole || undefined,
+          subagentName: step.subagentRole
+            ? delegatableAgents.find((agent) => agent.role === step.subagentRole)?.name
+            : undefined,
+          note: String(step.note || "").trim() || undefined,
+        };
+      });
+      currentPlan = {
+        version: (currentPlan?.version || 0) + 1,
+        objective: String(params.objective).trim(),
+        revisionReason: String(params.revisionReason || (currentPlan ? "计划已修订" : "初始计划")).trim(),
+        updatedAt: new Date().toISOString(),
+        steps,
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(currentPlan, null, 2) }],
+        details: { taskPlan: currentPlan },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "delegate_to_subagent",
     label: "Delegate to professional subagent",
     description: buildDescription(),
-    promptSnippet: "delegate_to_subagent: delegate a complete professional task to a configured pi-agent child runtime.",
+    promptSnippet: "delegate_to_subagent: execute one existing global-plan step in a configured pi-agent child runtime.",
     promptGuidelines: [
+      "Create the global plan first and bind every delegation to its real planStepId.",
       "Use this only for a complete professional task that benefits from an isolated subagent.",
       "Do not use it as a replacement for an atomic HTTP, MCP, browser, file, or shell tool call.",
+      "Pass only real facts, local paths, user-provided URLs, or prior tool results in context.",
     ],
-    parameters: Params,
+    parameters: DelegationParams,
     async execute(_toolCallId, params, signal) {
       const allowed = delegatableAgents.some((agent) => agent.role === params.role);
       if (!allowed) {
         throw new Error(\`Subagent role is not available to the current agent: \${String(params.role)}\`);
       }
-      const response = await fetch(bridge.url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: \`Bearer \${bridge.token}\`,
-        },
-        body: JSON.stringify({
-          taskId: crypto.randomUUID(),
-          parentSessionId,
-          callerAgentId,
-          role: params.role,
-          objective: params.objective,
-          context: params.context || "",
-        }),
-        signal,
-      });
+      if (!currentPlan) {
+        throw new Error("Create the global task plan with update_task_plan before delegating a subagent.");
+      }
+      const planStep = currentPlan.steps.find((step) => step.id === params.planStepId);
+      if (!planStep) {
+        throw new Error(\`Task plan step does not exist: \${String(params.planStepId)}\`);
+      }
+      if (planStep.subagentRole && planStep.subagentRole !== params.role) {
+        throw new Error(\`Task plan step \${planStep.id} is assigned to \${planStep.subagentRole}, not \${params.role}.\`);
+      }
+      planStep.status = "in_progress";
+      planStep.subagentRole = params.role;
+      planStep.subagentName = delegatableAgents.find((agent) => agent.role === params.role)?.name;
+      planStep.note = "正在由独立子智能体会话执行。";
+      currentPlan.updatedAt = new Date().toISOString();
+      let response;
+      try {
+        response = await fetch(bridge.url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: \`Bearer \${bridge.token}\`,
+          },
+          body: JSON.stringify({
+            taskId: crypto.randomUUID(),
+            parentSessionId,
+            callerAgentId,
+            role: params.role,
+            planStepId: params.planStepId,
+            objective: params.objective,
+            context: params.context || "",
+          }),
+          signal,
+        });
+      } catch (error) {
+        planStep.status = "failed";
+        planStep.note = error instanceof Error ? error.message : String(error);
+        currentPlan.updatedAt = new Date().toISOString();
+        throw error;
+      }
       const text = await response.text();
       if (!response.ok) {
+        planStep.status = "failed";
+        planStep.note = \`委托失败：HTTP \${response.status}\`;
+        currentPlan.updatedAt = new Date().toISOString();
         throw new Error(\`Subagent delegation failed: HTTP \${response.status} \${text.slice(0, 1200)}\`);
       }
       const result = JSON.parse(text);
+      planStep.status = "completed";
+      planStep.note = \`已由\${result.agentName || planStep.subagentName || "子智能体"}完成；子会话 \${result.childSessionId || "未知"}。\`;
+      currentPlan.updatedAt = new Date().toISOString();
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         details: {
@@ -1061,6 +1179,7 @@ export default function (pi) {
           subagentName: result.agentName,
           status: result.status,
           subagentProgressEvents: result.progressEvents || [],
+          taskPlan: currentPlan,
         },
       };
     },
@@ -1723,6 +1842,7 @@ export default function (pi) {
 			return;
 		}
 		if (event.type === "tool_execution_end") {
+			this.emitTaskPlanProgress(state, event);
 			const delegatedSummary = this.emitDelegatedSubagentProgress(state, event);
 			this.emitProgress(state, {
 				sessionId: state.session.id,
@@ -1804,6 +1924,29 @@ export default function (pi) {
 			.join(" ");
 	}
 
+	private emitTaskPlanProgress(state: RpcProcessSession, event: RpcEvent): void {
+		if (!this.isRecord(event.result)) {
+			return;
+		}
+		const details = event.result.details;
+		if (!this.isRecord(details)) {
+			return;
+		}
+		const taskPlan = this.normalizeTaskPlan(details.taskPlan);
+		if (!taskPlan) {
+			return;
+		}
+		const completedCount = taskPlan.steps.filter((step) => step.status === "completed").length;
+		this.emitProgress(state, {
+			id: `${event.toolCallId ?? crypto.randomUUID()}-plan-${taskPlan.version}-${completedCount}`,
+			sessionId: state.session.id,
+			title: event.toolName === "update_task_plan" ? "全局任务计划已更新" : "计划步骤执行状态已更新",
+			detail: `计划 v${taskPlan.version}；已完成 ${completedCount}/${taskPlan.steps.length}；${taskPlan.revisionReason}`,
+			status: taskPlan.steps.some((step) => step.status === "failed") ? "failure" : "info",
+			taskPlan,
+		});
+	}
+
 	private normalizeDelegatedProgressEvent(value: unknown): AgentProgressEvent | null {
 		if (!this.isRecord(value)) {
 			return null;
@@ -1826,15 +1969,47 @@ export default function (pi) {
 		};
 	}
 
-	private normalizeSubagentRole(value: unknown): MtclawSubagentRole | undefined {
-		if (
-			value === "enterprise_due_diligence" ||
-			value === "legal_research" ||
-			value === "civil_litigation_document_generation"
-		) {
-			return value;
+	private normalizeTaskPlan(value: unknown): AgentTaskPlan | null {
+		if (!this.isRecord(value) || !Array.isArray(value.steps)) {
+			return null;
 		}
-		return undefined;
+		const steps: AgentTaskPlan["steps"] = value.steps.flatMap((step): AgentTaskPlan["steps"] => {
+			if (!this.isRecord(step)) {
+				return [];
+			}
+			const status = step.status;
+			if (
+				typeof step.id !== "string" ||
+				typeof step.title !== "string" ||
+				(status !== "pending" && status !== "in_progress" && status !== "completed" && status !== "failed")
+			) {
+				return [];
+			}
+			return [
+				{
+					id: step.id,
+					title: step.title,
+					status,
+					subagentRole: typeof step.subagentRole === "string" ? step.subagentRole : undefined,
+					subagentName: typeof step.subagentName === "string" ? step.subagentName : undefined,
+					note: typeof step.note === "string" ? step.note : undefined,
+				},
+			];
+		});
+		if (steps.length === 0 || typeof value.objective !== "string" || typeof value.updatedAt !== "string") {
+			return null;
+		}
+		return {
+			version: typeof value.version === "number" ? value.version : 1,
+			objective: value.objective,
+			revisionReason: typeof value.revisionReason === "string" ? value.revisionReason : "",
+			updatedAt: value.updatedAt,
+			steps,
+		};
+	}
+
+	private normalizeSubagentRole(value: unknown): MtclawSubagentRole | undefined {
+		return typeof value === "string" && /^[a-z][a-z0-9_-]{1,63}$/.test(value) ? value : undefined;
 	}
 
 	private emitProgress(

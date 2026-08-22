@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
 	configSaveCapability: "config:save-capability",
 	configDeleteCapability: "config:delete-capability",
 	configDiscoverMcpTools: "config:discover-mcp-tools",
+	configSaveSubagentRoles: "config:save-subagent-roles",
 	configSaveAgent: "config:save-agent",
 	configDeleteAgent: "config:delete-agent",
 	configReset: "config:reset",

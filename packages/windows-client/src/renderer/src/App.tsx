@@ -55,6 +55,7 @@ import type {
   ModelSetupMode,
   MtclawRouterConfig,
   MtclawSubagentRole,
+  SubagentRoleConfig,
   StoredAgentConversation,
   UpdateState,
   WorkspaceFileInfo,
@@ -216,6 +217,7 @@ const auditActionLabels: Record<string, string> = {
   'model-response': '模型响应',
   'browser-tool': '浏览器工具',
   'save-agent-config': '保存智能体配置',
+  'save-subagent-roles': '保存专业角色目录',
   'delete-agent-config': '删除智能体配置',
 };
 
@@ -428,12 +430,6 @@ const capabilityTriggerLabels: Record<CapabilityConfig['triggerMode'], string> =
 const agentTypeLabels: Record<AgentConfig['type'], string> = {
   primary: '主智能体',
   sub: '子智能体',
-};
-
-const mtclawSubagentRoleLabels: Record<MtclawSubagentRole, string> = {
-  enterprise_due_diligence: '企业主体核验与风险尽调',
-  legal_research: '法规和类案研究',
-  civil_litigation_document_generation: '民事诉讼文书生成',
 };
 
 function formatBytes(size: number): string {
@@ -773,6 +769,22 @@ function createAgentConfig(): AgentConfig {
     enabled: true,
     notes: '',
   };
+}
+
+function createSubagentRoleConfig(): SubagentRoleConfig {
+  return {
+    id: '',
+    name: '',
+    description: '',
+    enabled: true,
+  };
+}
+
+function getSubagentRoleLabel(roles: SubagentRoleConfig[], roleId: string | null): string {
+  if (!roleId) {
+    return '未选择专业角色';
+  }
+  return roles.find((role) => role.id === roleId)?.name ?? roleId;
 }
 
 function createAgentKnowledgeItem(type: AgentKnowledgeItem['type'] = 'text'): AgentKnowledgeItem {
@@ -1502,6 +1514,7 @@ function AgentProgressSummary({
   }
 
   const latestEvent = events.at(-1);
+  const latestTaskPlan = [...events].reverse().find((event) => event.taskPlan)?.taskPlan;
   const durationMs = getProcessingDurationMs(item, now);
   const isRunning = item.processingStatus === 'running' || (!item.processingEndedAt && item.processingStartedAt);
   const statusText = item.processingStatus === 'failure' ? '处理失败' : isRunning ? '处理中' : '处理完成';
@@ -1522,6 +1535,33 @@ function AgentProgressSummary({
         </div>
       </div>
       {expanded && (
+        <>
+        {latestTaskPlan && (
+          <section className="checklist-box">
+            <strong>全局任务计划 v{latestTaskPlan.version}</strong>
+            <p>{latestTaskPlan.objective}</p>
+            <small>本次计划说明：{latestTaskPlan.revisionReason || '未填写'} · 更新于 {formatLocalTimestamp(latestTaskPlan.updatedAt)}</small>
+            <ol>
+              {latestTaskPlan.steps.map((step) => (
+                <li key={step.id}>
+                  <strong>
+                    {step.status === 'completed'
+                      ? '已完成'
+                      : step.status === 'in_progress'
+                        ? '执行中'
+                        : step.status === 'failed'
+                          ? '失败'
+                          : '待执行'}：{step.title}
+                  </strong>
+                  {(step.subagentName || step.subagentRole) && (
+                    <span> · {step.subagentName ?? step.subagentRole}{step.subagentRole ? `（${step.subagentRole}）` : ''}</span>
+                  )}
+                  {step.note && <p>{step.note}</p>}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
         <ol className="agent-progress-timeline">
           {events.map((event) => (
             <li className={`agent-progress-step ${event.status}`} key={event.id}>
@@ -1532,11 +1572,19 @@ function AgentProgressSummary({
                   <time dateTime={event.timestamp}>{formatLocalTimestamp(event.timestamp)}</time>
                 </div>
                 {event.detail && <p>{event.detail}</p>}
+                {event.source === 'subagent' && (
+                  <small>
+                    子智能体：{event.subagentName ?? '未命名'}
+                    {event.subagentRole ? ` · 角色 ${event.subagentRole}` : ''}
+                    {event.childSessionId ? ` · 子会话 ${event.childSessionId}` : ''}
+                  </small>
+                )}
                 {typeof event.durationMs === 'number' && <small>耗时 {formatDurationMs(event.durationMs)}</small>}
               </div>
             </li>
           ))}
         </ol>
+        </>
       )}
     </div>
   );
@@ -1732,6 +1780,8 @@ function App(): ReactElement {
   const [archivedConversationPageInput, setArchivedConversationPageInput] = useState('1');
   const [auditPageInput, setAuditPageInput] = useState('1');
   const [agentEditor, setAgentEditor] = useState<AgentConfig | null>(null);
+  const [subagentRoleEditor, setSubagentRoleEditor] = useState<SubagentRoleConfig | null>(null);
+  const [subagentRoleEditorOriginalId, setSubagentRoleEditorOriginalId] = useState<string | null>(null);
   const [agentKnowledgeEditor, setAgentKnowledgeEditor] = useState<AgentKnowledgeItem | null>(null);
   const [agentKnowledgeViewer, setAgentKnowledgeViewer] = useState<AgentKnowledgeItem | null>(null);
   const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
@@ -2843,6 +2893,11 @@ function App(): ReactElement {
       setStatusText('子智能体至少需要选择一个上级智能体');
       return;
     }
+    if (agent.type === 'sub' && !agent.mtclawRole) {
+      setConfigNotice({ tone: 'error', text: '子智能体必须选择一个可维护的专业角色。' });
+      setStatusText('请选择子智能体专业角色');
+      return;
+    }
     if (agent.modelIds.length === 0) {
       setConfigNotice({ tone: 'error', text: '智能体至少需要关联一个可用模型。' });
       setStatusText('智能体至少需要关联一个可用模型');
@@ -2853,21 +2908,15 @@ function App(): ReactElement {
       setStatusText('只有子智能体可以启用 MTClaw 自动路由');
       return;
     }
-    if (agent.mtclawRoutingEnabled && !agent.mtclawRole) {
-      setConfigNotice({ tone: 'error', text: '启用 MTClaw 自动路由前必须选择专业角色。' });
-      setStatusText('请选择 MTClaw 专业角色');
-      return;
-    }
     const conflictingAgent = draftConfig?.agents.find(
       (item) =>
         item.id !== agent.id &&
         item.enabled &&
-        item.mtclawRoutingEnabled &&
         item.mtclawRole === agent.mtclawRole,
     );
-    if (agent.enabled && agent.mtclawRoutingEnabled && conflictingAgent) {
+    if (agent.enabled && conflictingAgent) {
       setConfigNotice({ tone: 'error', text: `专业角色已由智能体“${conflictingAgent.name}”启用。` });
-      setStatusText('MTClaw 专业角色存在启用冲突');
+      setStatusText('专业角色存在启用冲突');
       return;
     }
 
@@ -2906,6 +2955,77 @@ function App(): ReactElement {
     setConfigNotice({ tone: 'success', text: `智能体已保存：${normalizedAgent.name}` });
     setStatusText(`智能体已保存：${normalizedAgent.name}`);
     await refreshAuditLogs();
+  }
+
+  async function saveSubagentRole(role: SubagentRoleConfig): Promise<void> {
+    if (!draftConfig) {
+      return;
+    }
+    const normalizedRole: SubagentRoleConfig = {
+      ...role,
+      id: role.id.trim(),
+      name: role.name.trim(),
+      description: role.description.trim(),
+    };
+    if (!/^[a-z][a-z0-9_-]{1,63}$/.test(normalizedRole.id)) {
+      setConfigNotice({ tone: 'error', text: '角色标识必须以小写英文字母开头，只能包含小写字母、数字、下划线或连字符。' });
+      return;
+    }
+    if (!normalizedRole.name) {
+      setConfigNotice({ tone: 'error', text: '角色名称不能为空。' });
+      return;
+    }
+    const existingIndex = subagentRoleEditorOriginalId
+      ? draftConfig.subagentRoles.findIndex((item) => item.id === subagentRoleEditorOriginalId)
+      : -1;
+    const duplicate = draftConfig.subagentRoles.find(
+      (item, index) => item.id === normalizedRole.id && index !== existingIndex,
+    );
+    if (duplicate) {
+      setConfigNotice({ tone: 'error', text: `角色标识已存在：${normalizedRole.id}` });
+      return;
+    }
+    const roles = existingIndex >= 0
+      ? draftConfig.subagentRoles.map((item, index) => (index === existingIndex ? normalizedRole : item))
+      : [...draftConfig.subagentRoles, normalizedRole];
+    const nextConfig = await window.windowsClient.saveSubagentRoles(roles);
+    setConfigState(nextConfig);
+    setDraftConfig(nextConfig.config);
+    if (agentEditor?.type === 'sub') {
+      setAgentEditor((agent) => agent ? { ...agent, mtclawRole: normalizedRole.id } : agent);
+    }
+    setSubagentRoleEditor(null);
+    setSubagentRoleEditorOriginalId(null);
+    setConfigNotice({ tone: 'success', text: `专业角色已保存：${normalizedRole.name}` });
+    await refreshAuditLogs();
+  }
+
+  function deleteSubagentRole(role: SubagentRoleConfig): void {
+    if (!draftConfig) {
+      return;
+    }
+    const referencingAgent = draftConfig.agents.find((agent) => agent.mtclawRole === role.id);
+    if (referencingAgent) {
+      setConfigNotice({ tone: 'error', text: `角色仍由智能体“${referencingAgent.name}”使用，请先调整该智能体。` });
+      return;
+    }
+    requestConfirm({
+      tone: 'danger',
+      title: '删除专业角色',
+      message: `确认删除“${role.name}”？`,
+      confirmLabel: '删除',
+      onConfirm: async () => {
+        const nextConfig = await window.windowsClient.saveSubagentRoles(
+          draftConfig.subagentRoles.filter((item) => item.id !== role.id),
+        );
+        setConfigState(nextConfig);
+        setDraftConfig(nextConfig.config);
+        setSubagentRoleEditor(null);
+        setSubagentRoleEditorOriginalId(null);
+        setConfigNotice({ tone: 'success', text: `专业角色已删除：${role.name}` });
+        await refreshAuditLogs();
+      },
+    });
   }
 
   async function duplicateAgentConfig(agent: AgentConfig): Promise<void> {
@@ -5314,10 +5434,10 @@ function App(): ReactElement {
                             <div>
                               <strong>{agent.name}</strong>
                               <span>{agent.description || '未填写描述'}</span>
-                              {agent.type === 'sub' && agent.mtclawRoutingEnabled && (
+                              {agent.type === 'sub' && agent.mtclawRole && (
                                 <span>
-                                  {agent.mtclawRole ? mtclawSubagentRoleLabels[agent.mtclawRole] : '未选择专业角色'}
-                                  {' · '}pi-agent 专业委托已启用
+                                  {getSubagentRoleLabel(draftConfig.subagentRoles, agent.mtclawRole)}
+                                  {' · '}{agent.mtclawRoutingEnabled ? '直连委托 + MTClaw 自动路由' : '模型直连委托'}
                                 </span>
                               )}
                             </div>
@@ -6377,6 +6497,86 @@ function App(): ReactElement {
         </div>
       )}
 
+      {subagentRoleEditor && (
+        <div className="modal-backdrop action-dialog-backdrop" role="presentation">
+          <section className="modal-panel knowledge-modal" role="dialog" aria-modal="true" aria-label="编辑专业角色">
+            <div className="panel-heading with-action">
+              <div>
+                <Bot size={20} />
+                <h3>{subagentRoleEditorOriginalId ? `编辑专业角色：${subagentRoleEditor.name}` : '新增专业角色'}</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => {
+                  setSubagentRoleEditor(null);
+                  setSubagentRoleEditorOriginalId(null);
+                }}
+                aria-label="关闭"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="model-form-layout">
+              <label>
+                <span>{requiredLabel('角色标识')}</span>
+                <input
+                  value={subagentRoleEditor.id}
+                  onChange={(event) =>
+                    setSubagentRoleEditor((role) => role ? { ...role, id: event.target.value.toLowerCase() } : role)
+                  }
+                  placeholder="例如 patent_review"
+                />
+                <small className="field-hint">稳定路由键；使用小写英文，例如 patent_review。</small>
+              </label>
+              <label>
+                <span>{requiredLabel('角色名称')}</span>
+                <input
+                  value={subagentRoleEditor.name}
+                  onChange={(event) =>
+                    setSubagentRoleEditor((role) => role ? { ...role, name: event.target.value } : role)
+                  }
+                  placeholder="例如 专利审查"
+                />
+              </label>
+              <label className="wide-field">
+                <span>角色说明</span>
+                <textarea
+                  value={subagentRoleEditor.description}
+                  onChange={(event) =>
+                    setSubagentRoleEditor((role) => role ? { ...role, description: event.target.value } : role)
+                  }
+                  rows={4}
+                  placeholder="说明适合委托给这个角色的完整专业任务。"
+                />
+              </label>
+              <label className="checkbox-row form-checkbox">
+                <input
+                  type="checkbox"
+                  checked={subagentRoleEditor.enabled}
+                  onChange={(event) =>
+                    setSubagentRoleEditor((role) => role ? { ...role, enabled: event.target.checked } : role)
+                  }
+                />
+                <span>启用该角色</span>
+              </label>
+            </div>
+            <div className="modal-actions">
+              {subagentRoleEditorOriginalId && (
+                <button type="button" className="quiet-button" onClick={() => deleteSubagentRole(subagentRoleEditor)}>
+                  <Trash2 size={16} />
+                  <span>删除</span>
+                </button>
+              )}
+              <button type="button" onClick={() => saveSubagentRole(subagentRoleEditor)}>
+                <Save size={16} />
+                <span>保存角色</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {agentEditor && draftConfig && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-panel" role="dialog" aria-modal="true" aria-label="编辑智能体">
@@ -6417,22 +6617,52 @@ function App(): ReactElement {
               {agentEditor.type === 'sub' && (
                 <>
                   <div className="form-section-heading wide-field">
-                    <strong>MTClaw 专业路由</strong>
-                    <span>稳定角色供 Function Router 自动选择；真实任务仍由 pi-agent 子智能体 Runtime 执行。</span>
+                    <strong>子智能体委托角色</strong>
+                    <span>角色同时用于模型直连委托和 MTClaw 自动路由；可在下方直接新增或编辑。</span>
                   </div>
                   <label>
-                    <span>专业角色</span>
-                    <select
-                      value={agentEditor.mtclawRole ?? ''}
-                      onChange={(event) =>
-                        updateAgentEditor('mtclawRole', (event.target.value || null) as MtclawSubagentRole | null)
-                      }
-                    >
-                      <option value="">请选择</option>
-                      {Object.entries(mtclawSubagentRoleLabels).map(([value, label]) => (
-                        <option value={value} key={value}>{label}</option>
-                      ))}
-                    </select>
+                    <span>{requiredLabel('专业角色')}</span>
+                    <div className="select-action-row">
+                      <select
+                        value={agentEditor.mtclawRole ?? ''}
+                        onChange={(event) =>
+                          updateAgentEditor('mtclawRole', (event.target.value || null) as MtclawSubagentRole | null)
+                        }
+                      >
+                        <option value="">请选择</option>
+                        {draftConfig.subagentRoles
+                          .filter((role) => role.enabled || role.id === agentEditor.mtclawRole)
+                          .map((role) => (
+                          <option value={role.id} key={role.id}>{role.name}（{role.id}）</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        onClick={() => {
+                          setSubagentRoleEditor(createSubagentRoleConfig());
+                          setSubagentRoleEditorOriginalId(null);
+                        }}
+                      >
+                        <Plus size={16} />
+                        <span>新增角色</span>
+                      </button>
+                      {agentEditor.mtclawRole && (
+                        <button
+                          type="button"
+                          className="quiet-button"
+                          onClick={() => {
+                            const role = draftConfig.subagentRoles.find((item) => item.id === agentEditor.mtclawRole);
+                            if (role) {
+                              setSubagentRoleEditor(role);
+                              setSubagentRoleEditorOriginalId(role.id);
+                            }
+                          }}
+                        >
+                          <span>编辑</span>
+                        </button>
+                      )}
+                    </div>
                   </label>
                   <label>
                     <span>MTClaw 自动路由</span>
@@ -6459,8 +6689,7 @@ function App(): ReactElement {
                   </label>
                   <div className="settings-meta wide-field">
                     <strong>
-                      {agentEditor.mtclawRoutingEnabled &&
-                      agentEditor.mtclawRole &&
+                      {agentEditor.mtclawRole &&
                       agentEditor.parentAgentIds.length > 0 &&
                       agentEditor.defaultModelId &&
                       agentEditor.enabled
@@ -6468,7 +6697,7 @@ function App(): ReactElement {
                         : '专业角色配置未就绪'}
                     </strong>
                     <span>
-                      配置就绪后，MTClaw 可通过委托协议启动 pi-agent 隔离子任务；真实可用性仍取决于 Router、模型和已绑定能力联通。
+                      配置就绪后，主智能体可在直连模式启动 pi-agent 隔离子任务；开启自动路由时还会同步给 MTClaw。
                     </span>
                   </div>
                 </>

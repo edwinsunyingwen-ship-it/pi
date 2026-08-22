@@ -16,6 +16,7 @@ import type {
 	ModelConfig,
 	ModelProfileConfig,
 	MtclawRouterConfig,
+	SubagentRoleConfig,
 } from "../shared/types";
 import { RpcAgentAdapter } from "./agent/agentAdapter";
 import { configureStaixAppIdentity } from "./appIdentity";
@@ -188,6 +189,9 @@ function registerIpcHandlers(): void {
 	);
 	ipcMain.handle(IPC_CHANNELS.configDiscoverMcpTools, (_event, capability: CapabilityConfig) =>
 		agentService.discoverMcpTools(capability),
+	);
+	ipcMain.handle(IPC_CHANNELS.configSaveSubagentRoles, (_event, roles: SubagentRoleConfig[]) =>
+		configService.saveSubagentRoles(roles),
 	);
 	ipcMain.handle(IPC_CHANNELS.configSaveAgent, (_event, agent: AgentConfig) => configService.saveAgentConfig(agent));
 	ipcMain.handle(IPC_CHANNELS.configDeleteAgent, (_event, id: string) => configService.deleteAgentConfig(id));

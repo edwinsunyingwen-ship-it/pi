@@ -17,6 +17,7 @@ const api: WindowsClientApi = {
 	saveCapabilityConfig: (capability) => ipcRenderer.invoke(IPC_CHANNELS.configSaveCapability, capability),
 	deleteCapabilityConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteCapability, id),
 	discoverMcpTools: (capability) => ipcRenderer.invoke(IPC_CHANNELS.configDiscoverMcpTools, capability),
+	saveSubagentRoles: (roles) => ipcRenderer.invoke(IPC_CHANNELS.configSaveSubagentRoles, roles),
 	saveAgentConfig: (agent) => ipcRenderer.invoke(IPC_CHANNELS.configSaveAgent, agent),
 	deleteAgentConfig: (id) => ipcRenderer.invoke(IPC_CHANNELS.configDeleteAgent, id),
 	resetClientConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configReset),

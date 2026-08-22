@@ -8,6 +8,7 @@ export interface SubagentDelegationRequest {
 	parentSessionId: string;
 	callerAgentId: string;
 	role: MtclawSubagentRole;
+	planStepId: string;
 	objective: string;
 	context?: string;
 }
@@ -93,13 +94,13 @@ export class SubagentBridgeService {
 			throw new Error("Subagent delegation request must be a JSON object.");
 		}
 		const request = value as Record<string, unknown>;
-		const role = request.role;
-		if (
-			role !== "enterprise_due_diligence" &&
-			role !== "legal_research" &&
-			role !== "civil_litigation_document_generation"
-		) {
+		const role = typeof request.role === "string" ? request.role.trim() : "";
+		if (!/^[a-z][a-z0-9_-]{1,63}$/.test(role)) {
 			throw new Error("Subagent delegation role is invalid.");
+		}
+		const planStepId = typeof request.planStepId === "string" ? request.planStepId.trim() : "";
+		if (!planStepId) {
+			throw new Error("Subagent delegation planStepId is required.");
 		}
 		const objective = typeof request.objective === "string" ? request.objective.trim() : "";
 		if (!objective) {
@@ -111,6 +112,7 @@ export class SubagentBridgeService {
 			parentSessionId: typeof request.parentSessionId === "string" ? request.parentSessionId : "",
 			callerAgentId: typeof request.callerAgentId === "string" ? request.callerAgentId : "",
 			role,
+			planStepId,
 			objective,
 			context: typeof request.context === "string" ? request.context.trim() : undefined,
 		};

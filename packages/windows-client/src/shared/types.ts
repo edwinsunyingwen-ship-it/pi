@@ -79,6 +79,25 @@ export interface AgentMessageResult {
 
 export type AgentProgressEventStatus = "running" | "success" | "failure" | "info";
 
+export type AgentTaskPlanStepStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export interface AgentTaskPlanStep {
+	id: string;
+	title: string;
+	status: AgentTaskPlanStepStatus;
+	subagentRole?: string;
+	subagentName?: string;
+	note?: string;
+}
+
+export interface AgentTaskPlan {
+	version: number;
+	objective: string;
+	revisionReason: string;
+	updatedAt: string;
+	steps: AgentTaskPlanStep[];
+}
+
 export interface AgentProgressEvent {
 	id: string;
 	sessionId: string;
@@ -92,6 +111,7 @@ export interface AgentProgressEvent {
 	childSessionId?: string;
 	subagentRole?: MtclawSubagentRole;
 	subagentName?: string;
+	taskPlan?: AgentTaskPlan;
 }
 
 export interface AgentImageContent {
@@ -437,7 +457,14 @@ export interface CapabilityConfig {
 
 export type AgentNodeType = "primary" | "sub";
 
-export type MtclawSubagentRole = "enterprise_due_diligence" | "legal_research" | "civil_litigation_document_generation";
+export type MtclawSubagentRole = string;
+
+export interface SubagentRoleConfig {
+	id: string;
+	name: string;
+	description: string;
+	enabled: boolean;
+}
 
 export interface AgentRuleConfig {
 	role: string;
@@ -495,6 +522,7 @@ export interface ClientConfig {
 	variables: ClientVariableConfig[];
 	model: ModelConfig;
 	capabilities: CapabilityConfig[];
+	subagentRoles: SubagentRoleConfig[];
 	agents: AgentConfig[];
 	defaultAgentId: string | null;
 	updatedAt: string;
@@ -519,6 +547,7 @@ export interface WindowsClientApi {
 	saveCapabilityConfig: (capability: CapabilityConfig) => Promise<ClientConfigState>;
 	deleteCapabilityConfig: (id: string) => Promise<ClientConfigState>;
 	discoverMcpTools: (capability: CapabilityConfig) => Promise<McpToolDiscoveryResult>;
+	saveSubagentRoles: (roles: SubagentRoleConfig[]) => Promise<ClientConfigState>;
 	saveAgentConfig: (agent: AgentConfig) => Promise<ClientConfigState>;
 	deleteAgentConfig: (id: string) => Promise<ClientConfigState>;
 	resetClientConfig: () => Promise<ClientConfigState>;

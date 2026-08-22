@@ -3,16 +3,10 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ClientConfig, ModelProfileConfig, MtclawSubagentRole } from "../../shared/types";
+import type { ClientConfig, ModelProfileConfig } from "../../shared/types";
 import type { AuditLogger } from "./auditLogger";
 
 const execFileAsync = promisify(execFile);
-
-const ROLE_DESCRIPTIONS: Record<MtclawSubagentRole, string> = {
-	enterprise_due_diligence: "Enterprise identity verification and risk due diligence.",
-	legal_research: "Legal regulation and comparable-case research.",
-	civil_litigation_document_generation: "Civil complaint and defense document generation.",
-};
 
 export class MtclawRuntimeConfigService {
 	constructor(private readonly auditLogger: AuditLogger) {}
@@ -27,10 +21,13 @@ export class MtclawRuntimeConfigService {
 
 		const routingModel = this.requireModel(config, config.mtclawRouter.routingModelId, "路由模型");
 		const upstreamModel = this.requireModel(config, config.mtclawRouter.upstreamModelId, "回答模型");
+		const enabledRoleDescriptions = new Map(
+			config.subagentRoles.filter((role) => role.enabled).map((role) => [role.id, role.description || role.name]),
+		);
 		const roles = config.agents
 			.filter((agent) => agent.enabled && agent.mtclawRoutingEnabled && agent.mtclawRole)
 			.map((agent) => agent.mtclawRole)
-			.filter((role): role is MtclawSubagentRole => Boolean(role));
+			.filter((role): role is string => typeof role === "string" && enabledRoleDescriptions.has(role));
 		const uniqueRoles = Array.from(new Set(roles));
 		if (uniqueRoles.length === 0) {
 			throw new Error("至少需要启用一个接受 MTClaw 自动路由的专业子智能体。");
@@ -73,7 +70,9 @@ export class MtclawRuntimeConfigService {
 						role: {
 							type: "string",
 							enum: uniqueRoles,
-							description: uniqueRoles.map((role) => `${role}: ${ROLE_DESCRIPTIONS[role]}`).join(" "),
+							description: uniqueRoles
+								.map((role) => `${role}: ${enabledRoleDescriptions.get(role) ?? role}`)
+								.join(" "),
 						},
 						objective: {
 							type: "string",
