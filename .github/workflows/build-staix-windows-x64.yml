@@ -1,0 +1,144 @@
+name: Build Staix Windows x64
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_aidocspro:
+        description: Publish the verified installer to the aidocspro.com Windows update feed
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - codex/staix-desktop-release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staix-windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-installer:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check
+        shell: pwsh
+        run: |
+          npm run check
+          if (-not $?) { exit 1 }
+          git diff --exit-code
+
+      - name: Build runtime packages
+        run: npm run build
+
+      - name: Build Windows installer
+        run: npm --workspace @pi-agent/windows-client run dist:win
+
+      - name: Verify update files
+        shell: pwsh
+        run: |
+          $release = "packages/windows-client/release"
+          $installer = Join-Path $release "Staix-Setup-1.0.5-x64.exe"
+          $blockmap = "$installer.blockmap"
+          $manifest = Join-Path $release "latest.yml"
+          foreach ($path in @($installer, $blockmap, $manifest)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required Windows release file was not produced: $path"
+            }
+          }
+          $manifestText = Get-Content -LiteralPath $manifest -Raw
+          if ($manifestText -notmatch "version:\s*1\.0\.5" -or $manifestText -notmatch "Staix-Setup-1\.0\.5-x64\.exe") {
+            throw "latest.yml does not describe Staix 1.0.5 x64."
+          }
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Staix-Setup-1.0.5-x64.exe" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+          Get-Item -LiteralPath $installer, $blockmap, $manifest, "$installer.sha256" |
+            Select-Object Name, Length
+
+      - name: Upload Windows release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Staix-1.0.5-x64-windows
+          path: |
+            packages/windows-client/release/Staix-Setup-1.0.5-x64.exe
+            packages/windows-client/release/Staix-Setup-1.0.5-x64.exe.blockmap
+            packages/windows-client/release/Staix-Setup-1.0.5-x64.exe.sha256
+            packages/windows-client/release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-update-feed:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_to_aidocspro }}
+    needs: build-installer
+    runs-on: ubuntu-24.04
+    environment: staix-production
+    env:
+      UPDATE_HOST: ${{ secrets.STAIX_UPDATE_HOST }}
+      UPDATE_USER: ${{ secrets.STAIX_UPDATE_USER }}
+      UPDATE_PATH: ${{ secrets.STAIX_UPDATE_PATH }}
+    steps:
+      - name: Download verified Windows release
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: Staix-1.0.5-x64-windows
+          path: release
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_HOST"
+          test -n "$UPDATE_USER"
+          test -n "$UPDATE_PATH"
+          [[ "$UPDATE_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$UPDATE_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$UPDATE_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          test -f release/Staix-Setup-1.0.5-x64.exe
+          test -f release/Staix-Setup-1.0.5-x64.exe.blockmap
+          test -f release/latest.yml
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          UPDATE_SSH_KEY: ${{ secrets.STAIX_UPDATE_SSH_KEY }}
+          UPDATE_KNOWN_HOSTS: ${{ secrets.STAIX_UPDATE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$UPDATE_SSH_KEY" > ~/.ssh/staix-update
+          chmod 600 ~/.ssh/staix-update
+          printf '%s\n' "$UPDATE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Publish immutable files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/staix-update "$UPDATE_USER@$UPDATE_HOST" "mkdir -p '$UPDATE_PATH'"
+          scp -i ~/.ssh/staix-update \
+            release/Staix-Setup-1.0.5-x64.exe \
+            release/Staix-Setup-1.0.5-x64.exe.blockmap \
+            release/Staix-Setup-1.0.5-x64.exe.sha256 \
+            "$UPDATE_USER@$UPDATE_HOST:$UPDATE_PATH/"
+
+      - name: Publish latest manifest last
+        shell: bash
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/staix-update release/latest.yml "$UPDATE_USER@$UPDATE_HOST:$UPDATE_PATH/latest.yml.next"
+          ssh -i ~/.ssh/staix-update "$UPDATE_USER@$UPDATE_HOST" \
+            "mv '$UPDATE_PATH/latest.yml.next' '$UPDATE_PATH/latest.yml'"

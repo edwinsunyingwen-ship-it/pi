@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/staix-mac-subagents-v1.0.2
+      - codex/staix-desktop-release
 
 permissions:
   contents: read
