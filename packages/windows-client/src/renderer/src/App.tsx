@@ -2943,8 +2943,11 @@ function App(): ReactElement {
     }
     const conflictingAgent = draftConfig?.agents.find(
       (item) =>
+        agent.type === 'sub' &&
+        Boolean(agent.mtclawRole) &&
         item.id !== agent.id &&
         item.enabled &&
+        item.type === 'sub' &&
         item.mtclawRole === agent.mtclawRole,
     );
     if (agent.enabled && conflictingAgent) {
