@@ -433,7 +433,7 @@ const agentTypeLabels: Record<AgentConfig['type'], string> = {
 const mtclawSubagentRoleLabels: Record<MtclawSubagentRole, string> = {
   enterprise_due_diligence: '企业主体核验与风险尽调',
   legal_research: '法规和类案研究',
-  contract_counterparty_risk_review: '合同相对方与合同风险审查',
+  civil_litigation_document_generation: '民事诉讼文书生成',
 };
 
 function formatBytes(size: number): string {
@@ -2777,6 +2777,14 @@ function App(): ReactElement {
       setStatusText('MTClaw Router Base URL 格式不正确');
       return;
     }
+	if (
+	  draftConfig.mtclawRouter.managedRuntime &&
+	  (!draftConfig.mtclawRouter.routingModelId || !draftConfig.mtclawRouter.upstreamModelId)
+	) {
+	  setConfigNotice({ tone: 'error', text: 'Staix 托管 Router 必须选择路由模型和回答模型。' });
+	  setStatusText('Router 模型选择不完整');
+	  return;
+	}
 
     setStatusText('正在保存 MTClaw Router 配置');
     const nextConfig = await window.windowsClient.saveMtclawRouterConfig(draftConfig.mtclawRouter);
@@ -3299,12 +3307,22 @@ function App(): ReactElement {
       if (!config) {
         return config;
       }
-      const connectionChanged = key === 'baseUrl' || key === 'apiKeyEnv' || key === 'apiKeyValue';
+	  const connectionChanged =
+	    key === 'baseUrl' ||
+	    key === 'apiKeyEnv' ||
+	    key === 'apiKeyValue' ||
+	    key === 'listenPort' ||
+	    key === 'routingModelId' ||
+	    key === 'upstreamModelId' ||
+	    key === 'managedRuntime';
+	  const managedBaseUrl =
+	    key === 'listenPort' ? `http://127.0.0.1:${String(value)}/v1` : config.mtclawRouter.baseUrl;
       return {
         ...config,
         mtclawRouter: {
           ...config.mtclawRouter,
           [key]: value,
+		  ...(key === 'listenPort' ? { baseUrl: managedBaseUrl } : {}),
           ...(connectionChanged ? { connectionStatus: 'untested' as const, lastTestedAt: null } : {}),
         },
       };
@@ -5389,6 +5407,15 @@ function App(): ReactElement {
                   </div>
                 </div>
                 <div className="settings-grid">
+				  <label className="wide-field checkbox-field">
+					<input
+					  type="checkbox"
+					  checked={draftConfig.mtclawRouter.managedRuntime}
+					  onChange={(event) => updateMtclawRouter('managedRuntime', event.target.checked)}
+					/>
+					<span>由 Staix 管理本机 Router 配置（Linux / AIOS）</span>
+					<small className="field-hint">开启后，保存会从当前模型和子智能体配置生成私有 Router 文件，不再手工维护第二份配置。</small>
+				  </label>
                   <label>
                     <span>自动压缩状态</span>
                     <div className="segmented-radio-group">
@@ -5545,6 +5572,44 @@ function App(): ReactElement {
                       placeholder="http://127.0.0.1:18790/v1"
                     />
                   </label>
+				  {draftConfig.mtclawRouter.managedRuntime && (
+					<>
+					  <label>
+						<span>Router 监听端口</span>
+						<input
+						  type="number"
+						  min={1}
+						  max={65535}
+						  value={draftConfig.mtclawRouter.listenPort}
+						  onChange={(event) => updateMtclawRouter('listenPort', Number(event.target.value))}
+						/>
+					  </label>
+					  <label>
+						<span>路由模型</span>
+						<select
+						  value={draftConfig.mtclawRouter.routingModelId}
+						  onChange={(event) => updateMtclawRouter('routingModelId', event.target.value)}
+						>
+						  <option value="">请选择</option>
+						  {draftConfig.model.models.filter((model) => model.enabled && model.api === 'openai-completions').map((model) => (
+							<option key={model.id} value={model.id}>{model.displayName}</option>
+						  ))}
+						</select>
+					  </label>
+					  <label>
+						<span>回答模型</span>
+						<select
+						  value={draftConfig.mtclawRouter.upstreamModelId}
+						  onChange={(event) => updateMtclawRouter('upstreamModelId', event.target.value)}
+						>
+						  <option value="">请选择</option>
+						  {draftConfig.model.models.filter((model) => model.enabled && model.api === 'openai-completions').map((model) => (
+							<option key={model.id} value={model.id}>{model.displayName}</option>
+						  ))}
+						</select>
+					  </label>
+					</>
+				  )}
                   <label>
                     <span>API Key 环境变量</span>
                     <input

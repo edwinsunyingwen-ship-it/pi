@@ -97,7 +97,7 @@ export class SubagentBridgeService {
 		if (
 			role !== "enterprise_due_diligence" &&
 			role !== "legal_research" &&
-			role !== "contract_counterparty_risk_review"
+			role !== "civil_litigation_document_generation"
 		) {
 			throw new Error("Subagent delegation role is invalid.");
 		}

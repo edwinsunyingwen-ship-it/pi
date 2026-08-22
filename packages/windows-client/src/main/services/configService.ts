@@ -177,7 +177,12 @@ export class ConfigService {
 		const sourceAgents = exists
 			? current.config.agents.map((item) => (item.id === agent.id ? agent : item))
 			: [...current.config.agents, agent];
-		const agents = this.normalizeAgents(sourceAgents, current.config.model.models, current.config.capabilities);
+		const normalizedAgents = this.normalizeAgents(
+			sourceAgents,
+			current.config.model.models,
+			current.config.capabilities,
+		);
+		const agents = this.synchronizeChangedAgentRelationships(normalizedAgents, agent.id);
 		const normalizedAgent = agents.find((item) => item.id === agent.id) ?? agents[0];
 		if (!normalizedAgent) {
 			throw new Error("智能体配置不能为空。");
@@ -257,7 +262,11 @@ export class ConfigService {
 			},
 			mtclawRouter: {
 				enabled: true,
+				managedRuntime: false,
 				baseUrl: "http://127.0.0.1:18790/v1",
+				listenPort: 18790,
+				routingModelId: "",
+				upstreamModelId: "",
 				apiKeyEnv: "",
 				apiKeyValue: "mtclaw-local",
 				connectionStatus: "untested",
@@ -399,7 +408,9 @@ export class ConfigService {
 			legacyEnterpriseApiBaseUrl,
 			defaultConfig.capabilities,
 		);
-		const agents = this.normalizeAgents(config.agents, model.models, capabilities);
+		const agents = this.ensureBidirectionalAgentRelationships(
+			this.normalizeAgents(config.agents, model.models, capabilities),
+		);
 		return {
 			agentCore: this.normalizeAgentCore(
 				config.agentCore,
@@ -427,7 +438,11 @@ export class ConfigService {
 	): MtclawRouterConfig {
 		return {
 			enabled: router?.enabled ?? fallback.enabled,
+			managedRuntime: router?.managedRuntime ?? fallback.managedRuntime,
 			baseUrl: router?.baseUrl?.trim() || fallback.baseUrl,
+			listenPort: Math.min(Math.max(Number(router?.listenPort ?? fallback.listenPort), 1), 65535),
+			routingModelId: router?.routingModelId?.trim() ?? fallback.routingModelId,
+			upstreamModelId: router?.upstreamModelId?.trim() ?? fallback.upstreamModelId,
 			apiKeyEnv: router?.apiKeyEnv?.trim() ?? fallback.apiKeyEnv,
 			apiKeyValue: router?.apiKeyValue ?? fallback.apiKeyValue,
 			connectionStatus: router?.connectionStatus ?? fallback.connectionStatus,
@@ -738,7 +753,7 @@ export class ConfigService {
 		switch (value) {
 			case "enterprise_due_diligence":
 			case "legal_research":
-			case "contract_counterparty_risk_review":
+			case "civil_litigation_document_generation":
 				return value;
 			default:
 				return null;
@@ -860,6 +875,66 @@ export class ConfigService {
 				notes: agent.notes ?? "",
 			};
 		});
+	}
+
+	private synchronizeChangedAgentRelationships(agents: AgentConfig[], changedAgentId: string): AgentConfig[] {
+		const changedAgent = agents.find((agent) => agent.id === changedAgentId);
+		if (!changedAgent) {
+			return agents;
+		}
+
+		const parentIds = new Set(changedAgent.parentAgentIds);
+		const childIds = new Set(changedAgent.childAgentIds);
+		return agents.map((agent) => {
+			if (agent.id === changedAgent.id) {
+				return agent;
+			}
+
+			const childAgentIds = parentIds.has(agent.id)
+				? Array.from(new Set([...agent.childAgentIds, changedAgent.id]))
+				: agent.childAgentIds.filter((id) => id !== changedAgent.id);
+			const parentAgentIds =
+				agent.type === "sub"
+					? childIds.has(agent.id)
+						? Array.from(new Set([...agent.parentAgentIds, changedAgent.id]))
+						: agent.parentAgentIds.filter((id) => id !== changedAgent.id)
+					: [];
+
+			return {
+				...agent,
+				parentAgentIds,
+				childAgentIds,
+			};
+		});
+	}
+
+	private ensureBidirectionalAgentRelationships(agents: AgentConfig[]): AgentConfig[] {
+		const parentIdsByChildId = new Map<string, Set<string>>();
+		const childIdsByParentId = new Map<string, Set<string>>();
+
+		for (const agent of agents) {
+			parentIdsByChildId.set(agent.id, new Set(agent.parentAgentIds));
+			childIdsByParentId.set(agent.id, new Set(agent.childAgentIds));
+		}
+		for (const child of agents) {
+			for (const parentId of child.parentAgentIds) {
+				childIdsByParentId.get(parentId)?.add(child.id);
+			}
+		}
+		for (const parent of agents) {
+			for (const childId of parent.childAgentIds) {
+				const child = agents.find((agent) => agent.id === childId);
+				if (child?.type === "sub") {
+					parentIdsByChildId.get(childId)?.add(parent.id);
+				}
+			}
+		}
+
+		return agents.map((agent) => ({
+			...agent,
+			parentAgentIds: agent.type === "sub" ? Array.from(parentIdsByChildId.get(agent.id) ?? []) : [],
+			childAgentIds: Array.from(childIdsByParentId.get(agent.id) ?? []),
+		}));
 	}
 
 	private createDefaultAgentRules() {

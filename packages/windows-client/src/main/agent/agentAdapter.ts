@@ -127,6 +127,11 @@ export interface AgentAdapter {
 
 type BrowserBridgeProvider = () => Promise<{ url: string; token: string } | null>;
 type SubagentBridgeProvider = () => Promise<{ url: string; token: string } | null>;
+type CivilDocumentBridgeProvider = () => Promise<{
+	generateUrl: string;
+	extractUrl: string;
+	token: string;
+} | null>;
 
 interface RpcProcessSession {
 	process: ChildProcessWithoutNullStreams;
@@ -152,6 +157,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 	constructor(
 		private readonly browserBridgeProvider?: BrowserBridgeProvider,
 		private readonly subagentBridgeProvider?: SubagentBridgeProvider,
+		private readonly civilDocumentBridgeProvider?: CivilDocumentBridgeProvider,
 	) {}
 
 	async startSession(options: AgentStartOptions = { model: null, cwd: null }): Promise<AgentSession> {
@@ -384,6 +390,14 @@ export class RpcAgentAdapter implements AgentAdapter {
 		const browserExtensionPath = await this.writeBrowserBridgeExtension(options.capabilities ?? [], agentDir);
 		if (browserExtensionPath) {
 			args.push("--extension", browserExtensionPath);
+		}
+		const civilDocumentExtensionPath = await this.writeCivilDocumentBridgeExtension(
+			options.capabilities ?? [],
+			agentDir,
+			options.cwd,
+		);
+		if (civilDocumentExtensionPath) {
+			args.push("--extension", civilDocumentExtensionPath);
 		}
 		const subagentExtensionPath = await this.writeSubagentBridgeExtension(options, agentDir, sessionId);
 		if (subagentExtensionPath) {
@@ -855,9 +869,35 @@ async function buildBody(capability, params) {
 }
 
 function summarizeResult(result, capability) {
-  if (typeof result === "string") return result;
-  const text = JSON.stringify(result, null, 2);
+  const normalizedResult = capability.toolName === "ocr_text_extract" ? normalizeTextInOcrResult(result) : result;
+  if (typeof normalizedResult === "string") return normalizedResult;
+  const text = JSON.stringify(normalizedResult, null, 2);
   return capability.resultFormat === "json" ? text : text;
+}
+
+function normalizeTextInOcrResult(result) {
+  const pages = Array.isArray(result?.result?.pages) ? result.result.pages : null;
+  if (!pages) return result;
+  const pageTexts = pages.map((page, index) => {
+    const lines = Array.isArray(page?.lines) ? page.lines : [];
+    const text = lines
+      .map((line) => (typeof line?.text === "string" ? line.text.trim() : ""))
+      .filter(Boolean)
+      .join("\\n");
+    return \`[第\${index + 1}页]\\n\${text}\`;
+  });
+  const fullText = pageTexts.join("\\n\\n");
+  const maxTextCharacters = 80000;
+  return {
+    version: typeof result?.version === "string" ? result.version : undefined,
+    pageCount: pages.length,
+    totalTextCharacters: fullText.length,
+    truncated: fullText.length > maxTextCharacters,
+    text:
+      fullText.length > maxTextCharacters
+        ? \`\${fullText.slice(0, maxTextCharacters)}\\n\\n[OCR正文超过\${maxTextCharacters}字符，后续内容已截断]\`
+        : fullText,
+  };
 }
 
 async function callHttpCapability(capability, params, signal) {
@@ -1021,6 +1061,213 @@ export default function (pi) {
           subagentName: result.agentName,
           status: result.status,
           subagentProgressEvents: result.progressEvents || [],
+        },
+      };
+    },
+  });
+}
+`;
+		await writeFile(extensionPath, source, "utf8");
+		return extensionPath;
+	}
+
+	private async writeCivilDocumentBridgeExtension(
+		capabilities: CapabilityConfig[],
+		agentDir: string,
+		workspacePath: string | null,
+	): Promise<string | null> {
+		const capability = capabilities.find(
+			(item) =>
+				item.enabled &&
+				item.executionMode === "builtin" &&
+				this.normalizeToolName(item.toolName) === "generate_civil_litigation_document",
+		);
+		if (!capability || !this.civilDocumentBridgeProvider) {
+			return null;
+		}
+		const bridge = await this.civilDocumentBridgeProvider();
+		if (!bridge) {
+			return null;
+		}
+
+		const extensionDir = join(agentDir, "windows-civil-document-bridge");
+		await mkdir(extensionDir, { recursive: true });
+		const extensionPath = join(extensionDir, "index.mjs");
+		const source = `const bridge = ${JSON.stringify(bridge, null, 2)};
+const capability = ${JSON.stringify(
+			{
+				id: capability.id,
+				name: capability.name,
+				description: capability.description,
+				useWhen: capability.useWhen,
+				avoidWhen: capability.avoidWhen,
+			},
+			null,
+			2,
+		)};
+const workspacePath = ${JSON.stringify(workspacePath)};
+
+const ExtractParams = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description: "Absolute local path to a DOCX, text-based PDF, TXT, or Markdown case material file.",
+    },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
+const GenerateParams = {
+  type: "object",
+  properties: {
+	outputMode: {
+	  type: "string",
+	  enum: ["preview", "docx"],
+	  description: "Use preview first. Use docx only after the user explicitly confirms the preview.",
+	},
+	confirmed: {
+	  type: "boolean",
+	  description: "Must be true for docx and only after explicit user confirmation. Use false for preview.",
+	},
+    template: {
+      type: "string",
+      enum: [
+        "civil_complaint_natural_person",
+        "civil_complaint_legal_entity",
+        "civil_defense_natural_person",
+        "civil_defense_legal_entity",
+      ],
+      description: "The selected official civil complaint or defense template and party type.",
+    },
+    partyLines: {
+      type: "array",
+      items: { type: "string" },
+      description: "Complete plaintiff lines for complaints or respondent lines for defenses, including agents when applicable.",
+    },
+    opposingPartyLines: {
+      type: "array",
+      items: { type: "string" },
+      description: "Complete defendant lines. Required for complaints.",
+    },
+    claims: { type: "array", items: { type: "string" }, description: "Complaint claims without numbering." },
+    factsAndReasons: {
+      type: "array",
+      items: { type: "string" },
+      description: "Complaint facts and reasons as separate paragraphs.",
+    },
+    caseReference: {
+      type: "string",
+      description: "For a defense: court, case number, parties, and cause of action that precede '一案的起诉'.",
+    },
+    defenseOpinions: {
+      type: "array",
+      items: { type: "string" },
+      description: "Defense opinions as separate paragraphs.",
+    },
+    evidence: {
+      type: "array",
+      items: { type: "string" },
+      description: "Evidence, sources, and witness names/addresses. Do not invent missing evidence.",
+    },
+    court: { type: "string", description: "Receiving people's court." },
+    copies: { type: "string", description: "Number of document copies, without the unit 份." },
+    signatureName: { type: "string", description: "Plaintiff or respondent name shown in the signature block." },
+    date: { type: "string", description: "Signature date. Leave empty when unknown; do not invent it." },
+    fileName: { type: "string", description: "Optional DOCX file name. The file is always written under generated-documents." },
+  },
+  required: ["outputMode", "confirmed", "template", "partyLines"],
+  additionalProperties: false,
+};
+
+function buildDescription() {
+  return [
+    capability.description || "Generate a formatted Chinese civil litigation DOCX from a supported template.",
+    capability.useWhen ? \`Use when: \${capability.useWhen}\` : "",
+    capability.avoidWhen ? \`Do not use when: \${capability.avoidWhen}\` : "",
+    "Never invent names, identity numbers, amounts, dates, case numbers, evidence, or courts. Leave unknown values empty so the tool marks them as pending.",
+  ].filter(Boolean).join("\\n");
+}
+
+export default function (pi) {
+  pi.registerTool({
+    name: "extract_civil_case_material",
+    label: "读取民事案件材料",
+    description: "Read DOCX, text-based PDF, TXT, or Markdown civil case material with deterministic UTF-8 decoding. Returns needsOcr=true when a PDF has no usable text layer. Never infer file contents from its name.",
+    promptSnippet: "extract_civil_case_material: deterministically read supported civil case material before drafting; do not use bash, pandoc, python, or pdftotext for supported files.",
+    promptGuidelines: [
+      "Call this tool first whenever the user supplies a DOCX, PDF, TXT, or Markdown case material path.",
+      "Treat only the returned text as file evidence. Never reconstruct unreadable or missing content from the file name or prior knowledge.",
+      "If needsOcr=true, call the configured OCR tool for the same path; otherwise do not call OCR.",
+    ],
+    parameters: ExtractParams,
+    async execute(_toolCallId, params, signal) {
+      const response = await fetch(bridge.extractUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: \`Bearer \${bridge.token}\`,
+        },
+        body: JSON.stringify(params),
+        signal,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(
+          \`Civil material extraction failed: HTTP \${response.status} \${text.slice(0, 1200)}\`,
+        );
+      }
+      const result = JSON.parse(text);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: {
+          capabilityId: capability.id,
+          capabilityName: capability.name,
+          path: result.path,
+          fileType: result.fileType,
+          usedOcr: result.usedOcr,
+          needsOcr: result.needsOcr,
+          pageCount: result.pageCount,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "generate_civil_litigation_document",
+    label: capability.name,
+    description: buildDescription(),
+    promptSnippet: "generate_civil_litigation_document: preview a verified civil complaint or defense, then create DOCX after confirmation.",
+    promptGuidelines: [
+      "Confirm document side and natural-person/legal-entity type before calling this tool.",
+	  "Always call outputMode=preview with confirmed=false first and present the preview plus missing fields.",
+	  "Call outputMode=docx with confirmed=true only after the user explicitly confirms the preview.",
+    ],
+    parameters: GenerateParams,
+    async execute(_toolCallId, params, signal) {
+      const response = await fetch(bridge.generateUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: \`Bearer \${bridge.token}\`,
+        },
+        body: JSON.stringify({ ...params, workspacePath }),
+        signal,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(\`Civil document generation failed: HTTP \${response.status} \${text.slice(0, 1200)}\`);
+      }
+      const result = JSON.parse(text);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: {
+          capabilityId: capability.id,
+          capabilityName: capability.name,
+          filePath: result.filePath,
+          template: result.template,
+          missingFields: result.missingFields || [],
         },
       };
     },
@@ -1583,7 +1830,7 @@ export default function (pi) {
 		if (
 			value === "enterprise_due_diligence" ||
 			value === "legal_research" ||
-			value === "contract_counterparty_risk_review"
+			value === "civil_litigation_document_generation"
 		) {
 			return value;
 		}

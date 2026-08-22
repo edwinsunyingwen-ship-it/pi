@@ -23,6 +23,7 @@ import type { WorkspaceService } from "./workspaceService";
 
 export class AgentService {
 	private readonly liveProgressHandlers = new Map<string, (event: AgentProgressEvent) => void>();
+	private readonly delegatedChildSessions = new Map<string, AgentSession>();
 
 	constructor(
 		private readonly adapter: AgentAdapter,
@@ -238,7 +239,17 @@ export class AgentService {
 		const objective = request.context
 			? `${request.objective}\n\n## 委托上下文\n${request.context}`
 			: request.objective;
-		let childSession: AgentSession | null = null;
+		const delegatedSessionKey = this.getDelegatedChildSessionKey(request.parentSessionId, subagent.id);
+		let childSession = delegatedSessionKey ? (this.delegatedChildSessions.get(delegatedSessionKey) ?? null) : null;
+		if (childSession) {
+			const currentState = await this.adapter.getSessionState(childSession.id);
+			if (!currentState || currentState.state === "stopped") {
+				this.delegatedChildSessions.delete(delegatedSessionKey);
+				childSession = null;
+			} else {
+				childSession = { ...childSession, ...currentState };
+			}
+		}
 
 		await this.writeAudit({
 			sessionId: request.parentSessionId,
@@ -250,27 +261,33 @@ export class AgentService {
 		});
 
 		try {
-			childSession = await this.adapter.startSession({
-				model,
-				cwd: workspace.path,
-				agentId: subagent.id,
-				agentName: subagent.name,
-				modelProfileId: model.id,
-				capabilities: enabledCapabilities,
-				variables: configState.config.variables,
-				contextCompaction: configState.config.contextCompaction,
-				appendSystemPrompt: [
-					this.buildAgentAppendSystemPrompt(subagent, model, enabledCapabilities, childAgents, workspace.path),
-					"",
-					"# 专业子任务委托合同",
-					`- 任务 ID：${request.taskId}`,
-					`- 稳定角色：${request.role}`,
-					"- 这是由 MTClaw Router 选择并由 pi-agent 隔离 Runtime 执行的专业子任务。",
-					"- 根据任务需要自主选择已绑定工具；不要把一次工具调用冒充为完整子智能体执行。",
-					"- 输出可复核的事实、来源、判断、限制和错误；不得编造未查询到的数据。",
-				].join("\n"),
-				isolated: true,
-			});
+			if (!childSession) {
+				childSession = await this.adapter.startSession({
+					model,
+					cwd: workspace.path,
+					agentId: subagent.id,
+					agentName: subagent.name,
+					modelProfileId: model.id,
+					capabilities: enabledCapabilities,
+					variables: configState.config.variables,
+					contextCompaction: configState.config.contextCompaction,
+					appendSystemPrompt: [
+						this.buildAgentAppendSystemPrompt(subagent, model, enabledCapabilities, childAgents, workspace.path),
+						"",
+						"# 专业子任务委托合同",
+						`- 初始任务 ID：${request.taskId}`,
+						`- 稳定角色：${request.role}`,
+						"- 同一主会话中的后续委托会继续使用当前子会话，以保留已经核验的材料和预览。",
+						"- 这是由 MTClaw Router 选择并由 pi-agent 隔离 Runtime 执行的专业子任务。",
+						"- 根据任务需要自主选择已绑定工具；不要把一次工具调用冒充为完整子智能体执行。",
+						"- 输出可复核的事实、来源、判断、限制和错误；不得编造未查询到的数据。",
+					].join("\n"),
+					isolated: true,
+				});
+				if (delegatedSessionKey) {
+					this.delegatedChildSessions.set(delegatedSessionKey, childSession);
+				}
+			}
 			const parentProgressHandler = this.liveProgressHandlers.get(request.parentSessionId);
 			const result = await this.adapter.sendUserMessage(
 				childSession.id,
@@ -330,12 +347,29 @@ export class AgentService {
 			});
 			throw error;
 		} finally {
-			if (childSession) {
+			if (childSession && !delegatedSessionKey) {
 				try {
 					await this.adapter.stopSession(childSession.id);
 				} catch {
 					// The child runtime may already have exited after a provider or tool failure.
 				}
+			}
+		}
+	}
+
+	private getDelegatedChildSessionKey(parentSessionId: string, subagentId: string): string {
+		return parentSessionId ? `${parentSessionId}:${subagentId}` : "";
+	}
+
+	private async stopDelegatedChildSessions(parentSessionId: string): Promise<void> {
+		const keyPrefix = `${parentSessionId}:`;
+		const sessions = Array.from(this.delegatedChildSessions.entries()).filter(([key]) => key.startsWith(keyPrefix));
+		for (const [key, session] of sessions) {
+			this.delegatedChildSessions.delete(key);
+			try {
+				await this.adapter.stopSession(session.id);
+			} catch {
+				// A child runtime may already have exited independently.
 			}
 		}
 	}
@@ -416,6 +450,7 @@ export class AgentService {
 	async stopSession(sessionId: string): Promise<AgentSession> {
 		try {
 			const session = await this.adapter.stopSession(sessionId);
+			await this.stopDelegatedChildSessions(sessionId);
 			await this.writeAudit({
 				sessionId,
 				businessAction: "stop-agent-session",
@@ -424,6 +459,7 @@ export class AgentService {
 			});
 			return session;
 		} catch (error) {
+			await this.stopDelegatedChildSessions(sessionId);
 			await this.writeAudit({
 				sessionId,
 				businessAction: "stop-agent-session",
@@ -982,6 +1018,20 @@ export class AgentService {
 		return value.replace(/\s+/g, " ").trim();
 	}
 
+	private mtclawTraceMessagesMatch(left: string, right: string): boolean {
+		const normalizedLeft = this.normalizeMtclawTraceMessage(left);
+		const normalizedRight = this.normalizeMtclawTraceMessage(right);
+		if (normalizedLeft === normalizedRight) {
+			return true;
+		}
+		const shorterLength = Math.min(normalizedLeft.length, normalizedRight.length);
+		if (shorterLength < 24) {
+			return false;
+		}
+		const stablePrefixLength = Math.min(shorterLength, 160);
+		return normalizedLeft.slice(0, stablePrefixLength) === normalizedRight.slice(0, stablePrefixLength);
+	}
+
 	private getMtclawToolCount(value: unknown): number {
 		if (Array.isArray(value)) {
 			return value.length;
@@ -997,30 +1047,36 @@ export class AgentService {
 	): Promise<AgentProgressEvent> {
 		const timestamp = new Date().toISOString();
 		try {
-			const history = await this.fetchMtclawRouterJson(router, "/v1/tool_history?limit=20");
-			const entries = this.isRecord(history) && Array.isArray(history.entries) ? history.entries : [];
 			const requestStartedAtMs = Date.parse(requestStartedAt);
-			const normalizedUserMessage = this.normalizeMtclawTraceMessage(userMessage);
-			const exactSessionEntry = entries.find(
-				(item) =>
-					this.isRecord(item) &&
-					this.getStringProperty(item, "session_key") === sessionId &&
-					Date.parse(this.getStringProperty(item, "timestamp")) >= requestStartedAtMs,
-			);
-			const matchingRequestEntries = entries
-				.filter(
+			let entry: unknown;
+			const tracePollAttempts = 12;
+			const tracePollIntervalMs = 500;
+			for (let attempt = 0; attempt < tracePollAttempts && !entry; attempt++) {
+				if (attempt > 0) {
+					await new Promise((resolvePromise) => setTimeout(resolvePromise, tracePollIntervalMs));
+				}
+				const history = await this.fetchMtclawRouterJson(router, "/v1/tool_history?limit=100");
+				const entries = this.isRecord(history) && Array.isArray(history.entries) ? history.entries : [];
+				const exactSessionEntry = entries.find(
 					(item) =>
 						this.isRecord(item) &&
-						this.normalizeMtclawTraceMessage(this.getStringProperty(item, "user_message")) ===
-							normalizedUserMessage &&
+						this.getStringProperty(item, "session_key") === sessionId &&
 						Date.parse(this.getStringProperty(item, "timestamp")) >= requestStartedAtMs,
-				)
-				.sort(
-					(left, right) =>
-						Date.parse(this.getStringProperty(right, "timestamp")) -
-						Date.parse(this.getStringProperty(left, "timestamp")),
 				);
-			const entry = exactSessionEntry ?? matchingRequestEntries[0];
+				const matchingRequestEntries = entries
+					.filter(
+						(item) =>
+							this.isRecord(item) &&
+							this.mtclawTraceMessagesMatch(this.getStringProperty(item, "user_message"), userMessage) &&
+							Date.parse(this.getStringProperty(item, "timestamp")) >= requestStartedAtMs,
+					)
+					.sort(
+						(left, right) =>
+							Date.parse(this.getStringProperty(right, "timestamp")) -
+							Date.parse(this.getStringProperty(left, "timestamp")),
+					);
+				entry = exactSessionEntry ?? matchingRequestEntries[0];
+			}
 			if (!entry || !this.isRecord(entry)) {
 				const detail = "请求已由 pi-agent 发送到 MTClaw，但 Router 尚未返回对应会话的追踪记录。";
 				await this.writeAudit({
@@ -1041,9 +1097,13 @@ export class AgentService {
 			}
 
 			const toolCalls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
-			const toolNames = toolCalls
-				.map((call) => (this.isRecord(call) ? this.getStringProperty(call, "name") : ""))
-				.filter(Boolean);
+			const toolNames = Array.from(
+				new Set(
+					toolCalls
+						.map((call) => (this.isRecord(call) ? this.getStringProperty(call, "name") : ""))
+						.filter(Boolean),
+				),
+			);
 			const llmCalls = Array.isArray(entry.llm_calls) ? entry.llm_calls : [];
 			const modelNames = llmCalls
 				.map((call) => (this.isRecord(call) ? this.getStringProperty(call, "model") : ""))

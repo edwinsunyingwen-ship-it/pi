@@ -22,8 +22,10 @@ import { configureStaixAppIdentity } from "./appIdentity";
 import { AgentService } from "./services/agentService";
 import { AuditLogger } from "./services/auditLogger";
 import { BrowserToolService } from "./services/browserToolService";
+import { CivilDocumentToolService } from "./services/civilDocumentToolService";
 import { ConfigService } from "./services/configService";
 import { ConversationStoreService } from "./services/conversationStoreService";
+import { MtclawRuntimeConfigService } from "./services/mtclawRuntimeConfigService";
 import { SubagentBridgeService } from "./services/subagentBridgeService";
 import { UpdateService } from "./services/updateService";
 import { WorkspaceFileService } from "./services/workspaceFileService";
@@ -33,15 +35,18 @@ configureStaixAppIdentity();
 
 const auditLogger = new AuditLogger();
 const configService = new ConfigService(auditLogger);
+const mtclawRuntimeConfigService = new MtclawRuntimeConfigService(auditLogger);
 const workspaceService = new WorkspaceService(auditLogger);
 const workspaceFileService = new WorkspaceFileService(workspaceService, auditLogger);
 const browserToolService = new BrowserToolService(auditLogger);
+const civilDocumentToolService = new CivilDocumentToolService(auditLogger);
 const subagentBridgeService = new SubagentBridgeService();
 const conversationStoreService = new ConversationStoreService();
 const updateService = new UpdateService();
 const agentAdapter = new RpcAgentAdapter(
 	() => browserToolService.getBridgeConfig(),
 	() => subagentBridgeService.getBridgeConfig(),
+	() => civilDocumentToolService.getBridgeConfig(),
 );
 const agentService = new AgentService(agentAdapter, auditLogger, workspaceService, configService);
 subagentBridgeService.setHandler((request) => agentService.delegateSubagent(request));
@@ -156,9 +161,11 @@ function registerIpcHandlers(): void {
 	ipcMain.handle(IPC_CHANNELS.configSaveAgentCore, (_event, agentCore: AgentCoreConfig) =>
 		configService.saveAgentCoreConfig(agentCore),
 	);
-	ipcMain.handle(IPC_CHANNELS.configSaveMtclawRouter, (_event, router: MtclawRouterConfig) =>
-		configService.saveMtclawRouterConfig(router),
-	);
+	ipcMain.handle(IPC_CHANNELS.configSaveMtclawRouter, async (_event, router: MtclawRouterConfig) => {
+		const state = await configService.saveMtclawRouterConfig(router);
+		await mtclawRuntimeConfigService.synchronize(state.config);
+		return state;
+	});
 	ipcMain.handle(IPC_CHANNELS.configTestMtclawRouter, (_event, router: MtclawRouterConfig) =>
 		agentService.testMtclawRouterConnection(router),
 	);

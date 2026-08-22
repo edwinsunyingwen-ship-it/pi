@@ -1,9 +1,10 @@
 {
   "name": "@pi-agent/windows-client",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "Staix desktop client for agent workflows.",
+  "homepage": "https://aidocspro.com",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -12,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "dist": "npm run build && electron-builder --win nsis --x64",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64"
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64",
+    "dist:mac:x64:unsigned": "npm run build && electron-builder --mac dir --x64",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb"
   },
   "build": {
     "appId": "com.staix.desktop",
@@ -125,6 +128,8 @@
       ]
     },
     "mac": {
+      "identity": null,
+      "hardenedRuntime": false,
       "target": [
         "dmg",
         "zip"
@@ -137,6 +142,34 @@
           "provider": "generic",
           "url": "https://aidocspro.com/staix-updates/mac"
         }
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Office",
+      "maintainer": "Staix",
+      "executableName": "staix",
+      "artifactName": "Staix-${version}-${arch}.${ext}",
+      "synopsis": "Staix agent workflow desktop client",
+      "description": "Staix desktop client with MTClaw professional routing and pi-agent runtime."
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libgbm1",
+        "libasound2"
       ]
     },
     "nsis": {
@@ -164,6 +197,7 @@
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "marked": "^16.3.0",
+    "pdfjs-dist": "5.4.394",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

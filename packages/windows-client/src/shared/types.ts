@@ -288,7 +288,11 @@ export interface AgentCoreConfig {
 
 export interface MtclawRouterConfig {
 	enabled: boolean;
+	managedRuntime: boolean;
 	baseUrl: string;
+	listenPort: number;
+	routingModelId: string;
+	upstreamModelId: string;
 	apiKeyEnv: string;
 	apiKeyValue: string;
 	connectionStatus: ModelConnectionStatus;
@@ -433,7 +437,7 @@ export interface CapabilityConfig {
 
 export type AgentNodeType = "primary" | "sub";
 
-export type MtclawSubagentRole = "enterprise_due_diligence" | "legal_research" | "contract_counterparty_risk_review";
+export type MtclawSubagentRole = "enterprise_due_diligence" | "legal_research" | "civil_litigation_document_generation";
 
 export interface AgentRuleConfig {
 	role: string;
