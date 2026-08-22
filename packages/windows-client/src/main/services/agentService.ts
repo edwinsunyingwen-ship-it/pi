@@ -64,7 +64,13 @@ export class AgentService {
 				item.id !== agent.id && (agent.childAgentIds.includes(item.id) || item.parentAgentIds.includes(agent.id)),
 		);
 		const delegatableSubagents = childAgents
-			.filter((item) => item.enabled && item.type === "sub" && item.mtclawRoutingEnabled && item.mtclawRole !== null)
+			.filter(
+				(item) =>
+					item.enabled &&
+					item.type === "sub" &&
+					item.mtclawRole !== null &&
+					(!configState.config.mtclawRouter.enabled || item.mtclawRoutingEnabled),
+			)
 			.map((item) => ({
 				role: item.mtclawRole as NonNullable<typeof item.mtclawRole>,
 				name: item.name,
@@ -89,9 +95,7 @@ export class AgentService {
 				effectiveWorkspacePath,
 			),
 			subagentDelegation:
-				configState.config.mtclawRouter.enabled && delegatableSubagents.length > 0
-					? { callerAgentId: agent.id, agents: delegatableSubagents }
-					: undefined,
+				delegatableSubagents.length > 0 ? { callerAgentId: agent.id, agents: delegatableSubagents } : undefined,
 		});
 		const runtimeSession = await this.adapter.getSessionState(startedSession.id);
 		const session: AgentSession = {
@@ -105,7 +109,7 @@ export class AgentService {
 		await this.writeAudit({
 			sessionId: session.id,
 			businessAction: "start-agent-session",
-			outputSummary: `会话 ${session.id} 已启动。智能体：${agent.name}；模型：${model.provider}/${model.modelId || model.displayName}；路由：${configState.config.mtclawRouter.enabled ? "MTClaw" : "直连"}；能力：${agent.capabilityIds.length} 个。`,
+			outputSummary: `会话 ${session.id} 已启动。智能体：${agent.name}；模型：${model.provider}/${model.modelId || model.displayName}；路由：${configState.config.mtclawRouter.enabled ? "MTClaw" : "直连"}；能力：${agent.capabilityIds.length} 个；可委托子智能体：${delegatableSubagents.length} 个。`,
 			status: "success",
 		});
 		return session;
@@ -213,7 +217,7 @@ export class AgentService {
 			(item) =>
 				item.enabled &&
 				item.type === "sub" &&
-				item.mtclawRoutingEnabled &&
+				(!configState.config.mtclawRouter.enabled || item.mtclawRoutingEnabled) &&
 				item.mtclawRole === request.role &&
 				(caller.childAgentIds.includes(item.id) || item.parentAgentIds.includes(caller.id)),
 		);
@@ -278,7 +282,7 @@ export class AgentService {
 						`- 初始任务 ID：${request.taskId}`,
 						`- 稳定角色：${request.role}`,
 						"- 同一主会话中的后续委托会继续使用当前子会话，以保留已经核验的材料和预览。",
-						"- 这是由 MTClaw Router 选择并由 pi-agent 隔离 Runtime 执行的专业子任务。",
+						"- 这是由主智能体委托并由 pi-agent 隔离 Runtime 执行的专业子任务。",
 						"- 根据任务需要自主选择已绑定工具；不要把一次工具调用冒充为完整子智能体执行。",
 						"- 输出可复核的事实、来源、判断、限制和错误；不得编造未查询到的数据。",
 					].join("\n"),
