@@ -47,9 +47,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="$(find packages/windows-client/release -type d -name 'Staix.app' -print -quit)"
+          app_path="$(find . -path '*/release/*' \( -name 'Staix.app' -o -name 'staix.app' \) -print -quit)"
           if [[ -z "$app_path" ]]; then
             echo "Staix.app was not produced" >&2
+            find . -path '*/release/*' -print >&2
             exit 1
           fi
 
