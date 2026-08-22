@@ -111,8 +111,6 @@ interface ToolResultCapabilityMeta {
 	capabilityName?: string;
 }
 
-const AGENT_REPLY_TIMEOUT_MS = 30 * 60 * 1000;
-
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
 	sendUserMessage(
@@ -150,6 +148,7 @@ interface RpcProcessSession {
 	events: RpcEvent[];
 	progressEvents: AgentProgressEvent[];
 	progressHandler?: (event: AgentProgressEvent) => void;
+	stopRequested: boolean;
 }
 
 export class RpcAgentAdapter implements AgentAdapter {
@@ -181,6 +180,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			pending: new Map(),
 			events: [],
 			progressEvents: [],
+			stopRequested: false,
 		};
 
 		this.attachJsonlReader(state);
@@ -234,6 +234,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 		}
 
 		state.session = { ...state.session, state: "running" };
+		state.stopRequested = false;
 
 		state.events = [];
 		state.progressEvents = [];
@@ -307,6 +308,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 		}
 
 		if (state.process.exitCode === null) {
+			state.stopRequested = true;
 			state.process.kill("SIGTERM");
 		}
 		const stoppedSession: AgentSession = { ...state.session, state: "stopped" };
@@ -2103,22 +2105,34 @@ export default function (pi) {
 		return { systemPrompt, tools, messageCount };
 	}
 
-	private waitForAgentEnd(state: RpcProcessSession, timeoutMs = AGENT_REPLY_TIMEOUT_MS): Promise<RpcEvent[]> {
+	private waitForAgentEnd(state: RpcProcessSession): Promise<RpcEvent[]> {
 		return new Promise((resolvePromise, rejectPromise) => {
 			const startedAt = state.events.length;
-			const timer = setTimeout(() => {
+			const cleanup = (): void => {
 				clearInterval(interval);
-				rejectPromise(new Error(`等待石斧智能体回复超时。${state.stderr}`));
-			}, timeoutMs);
+				state.process.off("exit", handleExit);
+			};
+			const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+				cleanup();
+				if (state.stopRequested) {
+					rejectPromise(new Error("智能体任务已由用户停止。"));
+					return;
+				}
+				const exitReason = signal ? `信号 ${signal}` : `退出码 ${code ?? "未知"}`;
+				rejectPromise(new Error(`石斧智能体运行时在完成回复前退出（${exitReason}）。${state.stderr}`));
+			};
 
 			const interval = setInterval(() => {
 				const events = state.events.slice(startedAt);
 				if (events.some((event) => event.type === "agent_end")) {
-					clearTimeout(timer);
-					clearInterval(interval);
+					cleanup();
 					resolvePromise(events);
 				}
 			}, 100);
+			state.process.once("exit", handleExit);
+			if (state.process.exitCode !== null) {
+				handleExit(state.process.exitCode, state.process.signalCode);
+			}
 		});
 	}
 

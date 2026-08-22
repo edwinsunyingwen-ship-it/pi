@@ -63,17 +63,17 @@ jobs:
           ditto "$app_path" "$staging/Staix.app"
           ln -s /Applications "$staging/Applications"
 
-          dmg="packages/windows-client/release/Staix-1.0.4-x64.dmg"
-          hdiutil create -volname "Staix 1.0.4" -srcfolder "$staging" -ov -format UDZO "$dmg"
+          dmg="packages/windows-client/release/Staix-1.0.5-x64.dmg"
+          hdiutil create -volname "Staix 1.0.5" -srcfolder "$staging" -ov -format UDZO "$dmg"
           hdiutil verify "$dmg"
           shasum -a 256 "$dmg" > "$dmg.sha256"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: Staix-1.0.4-x64-macos
+          name: Staix-1.0.5-x64-macos
           path: |
-            packages/windows-client/release/Staix-1.0.4-x64.dmg
-            packages/windows-client/release/Staix-1.0.4-x64.dmg.sha256
+            packages/windows-client/release/Staix-1.0.5-x64.dmg
+            packages/windows-client/release/Staix-1.0.5-x64.dmg.sha256
           if-no-files-found: error
           retention-days: 14

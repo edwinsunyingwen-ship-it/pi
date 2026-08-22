@@ -1517,7 +1517,13 @@ function AgentProgressSummary({
   const latestTaskPlan = [...events].reverse().find((event) => event.taskPlan)?.taskPlan;
   const durationMs = getProcessingDurationMs(item, now);
   const isRunning = item.processingStatus === 'running' || (!item.processingEndedAt && item.processingStartedAt);
-  const statusText = item.processingStatus === 'failure' ? '处理失败' : isRunning ? '处理中' : '处理完成';
+  const statusText = item.processingStatus === 'failure'
+    ? '处理失败'
+    : item.processingStatus === 'info' && item.processingEndedAt
+      ? '已停止'
+      : isRunning
+        ? '处理中'
+        : '处理完成';
 
   return (
     <div className="agent-progress-box">
@@ -1535,56 +1541,83 @@ function AgentProgressSummary({
         </div>
       </div>
       {expanded && (
-        <>
-        {latestTaskPlan && (
-          <section className="checklist-box">
-            <strong>全局任务计划 v{latestTaskPlan.version}</strong>
-            <p>{latestTaskPlan.objective}</p>
-            <small>本次计划说明：{latestTaskPlan.revisionReason || '未填写'} · 更新于 {formatLocalTimestamp(latestTaskPlan.updatedAt)}</small>
-            <ol>
-              {latestTaskPlan.steps.map((step) => (
-                <li key={step.id}>
-                  <strong>
-                    {step.status === 'completed'
-                      ? '已完成'
-                      : step.status === 'in_progress'
-                        ? '执行中'
-                        : step.status === 'failed'
-                          ? '失败'
-                          : '待执行'}：{step.title}
-                  </strong>
-                  {(step.subagentName || step.subagentRole) && (
-                    <span> · {step.subagentName ?? step.subagentRole}{step.subagentRole ? `（${step.subagentRole}）` : ''}</span>
-                  )}
-                  {step.note && <p>{step.note}</p>}
+        <div className="agent-progress-details">
+          {latestTaskPlan && (
+            <section className="agent-plan-panel">
+              <header className="agent-detail-section-head">
+                <div>
+                  <small>GLOBAL PLAN</small>
+                  <strong>全局工作计划</strong>
+                </div>
+                <span className="agent-plan-version">版本 {latestTaskPlan.version}</span>
+              </header>
+              <p className="agent-plan-objective">{latestTaskPlan.objective}</p>
+              <div className="agent-plan-meta">
+                <span>计划说明：{latestTaskPlan.revisionReason || '未填写'}</span>
+                <time dateTime={latestTaskPlan.updatedAt}>更新于 {formatLocalTimestamp(latestTaskPlan.updatedAt)}</time>
+              </div>
+              <ol className="agent-plan-list">
+                {latestTaskPlan.steps.map((step, index) => (
+                  <li className={`agent-plan-step ${step.status}`} key={step.id}>
+                    <span className="agent-plan-index">{index + 1}</span>
+                    <div className="agent-plan-step-content">
+                      <div className="agent-plan-step-head">
+                        <strong>{step.title}</strong>
+                        <span className={`agent-plan-status ${step.status}`}>
+                          {step.status === 'completed'
+                            ? '已完成'
+                            : step.status === 'in_progress'
+                              ? '执行中'
+                              : step.status === 'failed'
+                                ? '失败'
+                                : '待执行'}
+                        </span>
+                      </div>
+                      {(step.subagentName || step.subagentRole) && (
+                        <div className="agent-plan-tags">
+                          {step.subagentName && <span>{step.subagentName}</span>}
+                          {step.subagentRole && <code>{step.subagentRole}</code>}
+                        </div>
+                      )}
+                      {step.note && <p>{step.note}</p>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          <section className="agent-execution-panel">
+            <header className="agent-detail-section-head">
+              <div>
+                <small>EXECUTION LOG</small>
+                <strong>执行详细过程</strong>
+              </div>
+              <span className="agent-execution-count">{events.length} 个步骤</span>
+            </header>
+            <ol className="agent-progress-timeline">
+              {events.map((event) => (
+                <li className={`agent-progress-step ${event.status}`} key={event.id}>
+                  <span className="agent-progress-dot" />
+                  <div>
+                    <div className="agent-progress-step-head">
+                      <strong>{event.title}</strong>
+                      <time dateTime={event.timestamp}>{formatLocalTimestamp(event.timestamp)}</time>
+                    </div>
+                    {event.detail && <p>{event.detail}</p>}
+                    {event.source === 'subagent' && (
+                      <small>
+                        子智能体：{event.subagentName ?? '未命名'}
+                        {event.subagentRole ? ` · 角色 ${event.subagentRole}` : ''}
+                        {event.childSessionId ? ` · 子会话 ${event.childSessionId}` : ''}
+                      </small>
+                    )}
+                    {typeof event.durationMs === 'number' && <small>耗时 {formatDurationMs(event.durationMs)}</small>}
+                  </div>
                 </li>
               ))}
             </ol>
           </section>
-        )}
-        <ol className="agent-progress-timeline">
-          {events.map((event) => (
-            <li className={`agent-progress-step ${event.status}`} key={event.id}>
-              <span className="agent-progress-dot" />
-              <div>
-                <div className="agent-progress-step-head">
-                  <strong>{event.title}</strong>
-                  <time dateTime={event.timestamp}>{formatLocalTimestamp(event.timestamp)}</time>
-                </div>
-                {event.detail && <p>{event.detail}</p>}
-                {event.source === 'subagent' && (
-                  <small>
-                    子智能体：{event.subagentName ?? '未命名'}
-                    {event.subagentRole ? ` · 角色 ${event.subagentRole}` : ''}
-                    {event.childSessionId ? ` · 子会话 ${event.childSessionId}` : ''}
-                  </small>
-                )}
-                {typeof event.durationMs === 'number' && <small>耗时 {formatDurationMs(event.durationMs)}</small>}
-              </div>
-            </li>
-          ))}
-        </ol>
-        </>
+        </div>
       )}
     </div>
   );
@@ -4200,6 +4233,7 @@ function App(): ReactElement {
     } catch (error) {
       const failedAt = new Date().toISOString();
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const wasStoppedByUser = errorMessage.includes('智能体任务已由用户停止');
       const failedConversation = agentConversationsRef.current[messageAgent.id]?.find(
         (item) => item.id === messageConversation.id,
       );
@@ -4212,17 +4246,17 @@ function App(): ReactElement {
           ...userTranscript,
           {
             ...assistantItem,
-            text: `处理失败：${errorMessage}`,
+            text: wasStoppedByUser ? '处理已由用户停止。' : `处理失败：${errorMessage}`,
             progressEvents: failedProgressEvents,
             processingEndedAt: failedAt,
             processingDurationMs: new Date(failedAt).getTime() - new Date(assistantStartedAt).getTime(),
-            processingStatus: 'failure',
+            processingStatus: wasStoppedByUser ? 'info' : 'failure',
           },
         ],
         draftMessage: '',
       });
-      setAgentNotice({ tone: 'error', text: errorMessage });
-      setStatusText('智能体处理失败');
+      setAgentNotice({ tone: wasStoppedByUser ? 'info' : 'error', text: errorMessage });
+      setStatusText(wasStoppedByUser ? '智能体任务已停止' : '智能体处理失败');
     } finally {
       delete activeProgressTargetsRef.current[messageSession.id];
       await refreshAuditLogs();

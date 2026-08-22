@@ -1320,13 +1320,217 @@ dd {
   min-height: 28px;
 }
 
-.agent-progress-timeline {
+.agent-progress-details {
   border-top: 1px solid #e4e7ec;
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+}
+
+.agent-plan-panel,
+.agent-execution-panel {
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.agent-plan-panel {
+  background: linear-gradient(145deg, #f7fbf8 0%, #f2f7f4 100%);
+  border-color: #cfe0d7;
+  padding: 14px;
+}
+
+.agent-execution-panel {
+  background: #fff;
+  padding: 14px;
+}
+
+.agent-detail-section-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.agent-detail-section-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.agent-detail-section-head small {
+  color: #698078;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.agent-detail-section-head strong {
+  color: #183c35;
+  font-size: 0.96rem;
+}
+
+.agent-plan-version,
+.agent-execution-count {
+  background: #e2eee7;
+  border-radius: 999px;
+  color: #285f50;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.agent-execution-count {
+  background: #f0f2f5;
+  color: #5b6472;
+}
+
+.agent-plan-objective {
+  color: #344b45;
+  font-size: 0.87rem;
+  line-height: 1.55;
+  margin: 10px 0 8px;
+}
+
+.agent-plan-meta {
+  align-items: center;
+  color: #6a7772;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  gap: 6px 14px;
+  justify-content: space-between;
+}
+
+.agent-plan-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.agent-plan-step {
+  align-items: start;
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid #dfe9e3;
+  border-left: 3px solid #aebcb6;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  padding: 10px;
+}
+
+.agent-plan-step.completed {
+  border-left-color: #2f8a57;
+}
+
+.agent-plan-step.in_progress {
+  background: #fffdf5;
+  border-color: #e8d8a9;
+  border-left-color: #c28b25;
+}
+
+.agent-plan-step.failed {
+  background: #fff8f7;
+  border-color: #eccfca;
+  border-left-color: #b94a48;
+}
+
+.agent-plan-index {
+  align-items: center;
+  background: #edf2ef;
+  border-radius: 999px;
+  color: #52635c;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 900;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.agent-plan-step-content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-plan-step-head {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.agent-plan-step-head strong {
+  color: #24322e;
+  line-height: 1.45;
+}
+
+.agent-plan-status {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  font-weight: 900;
+  padding: 3px 8px;
+}
+
+.agent-plan-status.pending {
+  background: #edf0f3;
+  color: #667085;
+}
+
+.agent-plan-status.in_progress {
+  background: #fff0c9;
+  color: #8a5b09;
+}
+
+.agent-plan-status.completed {
+  background: #dff1e5;
+  color: #247247;
+}
+
+.agent-plan-status.failed {
+  background: #f7dfdc;
+  color: #9b3c3a;
+}
+
+.agent-plan-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-plan-tags span,
+.agent-plan-tags code {
+  background: #edf3ef;
+  border: 1px solid #dce7e1;
+  border-radius: 5px;
+  color: #4a625a;
+  font-family: inherit;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+}
+
+.agent-plan-tags code {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+.agent-plan-step-content p {
+  color: #63716c;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.agent-progress-timeline {
   display: grid;
   gap: 0;
   list-style: none;
-  margin: 0;
-  padding: 8px 0 0;
+  margin: 12px 0 0;
+  padding: 0;
 }
 
 .agent-progress-step {
