@@ -5,7 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createServer as createNetServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { BrowserWindow } from "electron";
 import type { AuditLogger } from "./auditLogger";
@@ -838,6 +838,12 @@ export class BrowserToolService {
 	private findChromeExecutable(): string | null {
 		const candidates = [
 			process.env.CHROME_PATH,
+			process.platform === "darwin"
+				? join("/Applications", "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
+				: undefined,
+			process.platform === "darwin"
+				? join(homedir(), "Applications", "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
+				: undefined,
 			process.env.LOCALAPPDATA
 				? join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe")
 				: undefined,

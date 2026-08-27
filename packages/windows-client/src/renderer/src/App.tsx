@@ -206,6 +206,8 @@ const auditActionLabels: Record<string, string> = {
   'reset-client-config': '恢复默认配置',
   'agent-user-question': '用户提问',
   'agent-assistant-reply': 'Agent 回复',
+  'agent-progress': 'Agent 执行节点',
+  'subagent-progress': '子智能体执行节点',
   'capability-invoked': '调用能力',
   'capability-result': '能力返回',
   'test-model-connection': '模型联通测试',
@@ -1084,13 +1086,34 @@ function getAuditActionLabel(action: string): string {
   return auditActionLabels[action] ?? action;
 }
 
+function getAuditStatusLabel(status: AuditLogEntry['status']): string {
+  const labels: Record<AuditLogEntry['status'], string> = {
+    running: '执行中',
+    success: '成功',
+    failure: '失败',
+    info: '信息',
+  };
+  return labels[status];
+}
+
+function getAuditStatusClassName(status: AuditLogEntry['status']): string {
+  if (status === 'failure') {
+    return 'disabled';
+  }
+  return status === 'running' ? '' : 'enabled';
+}
+
 function getAuditEntryLogFilePath(logsDirectory: string | null, entry: AuditLogEntry): string | null {
   if (!logsDirectory) {
     return null;
   }
   const separator = logsDirectory.includes('\\') ? '\\' : '/';
   const base = logsDirectory.endsWith('\\') || logsDirectory.endsWith('/') ? logsDirectory.slice(0, -1) : logsDirectory;
-  return `${base}${separator}audit-${entry.timestamp.slice(0, 10)}.jsonl`;
+  const timestamp = new Date(entry.timestamp);
+  const day = Number.isNaN(timestamp.getTime())
+    ? entry.timestamp.slice(0, 10)
+    : `${timestamp.getFullYear()}-${padDatePart(timestamp.getMonth() + 1)}-${padDatePart(timestamp.getDate())}`;
+  return `${base}${separator}audit-${day}.jsonl`;
 }
 
 function getMessageAnchorId(conversationId: string, messageIndex: number): string {
@@ -1826,6 +1849,8 @@ function App(): ReactElement {
   const [visionEnabledByConversationId, setVisionEnabledByConversationId] = useState<Record<string, boolean>>({});
   const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const knowledgeFileInputRef = useRef<HTMLInputElement | null>(null);
+  const auditProgressRefreshTimerRef = useRef<number | null>(null);
+  const refreshAuditLogsRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   useEffect(() => {
     void refreshInitialState();
@@ -1834,9 +1859,26 @@ function App(): ReactElement {
   useEffect(() => {
     const unsubscribe = window.windowsClient.onAgentProgress((progressEvent) => {
       appendProgressEvent(progressEvent);
+      if (auditProgressRefreshTimerRef.current !== null) {
+        window.clearTimeout(auditProgressRefreshTimerRef.current);
+      }
+      auditProgressRefreshTimerRef.current = window.setTimeout(() => {
+        auditProgressRefreshTimerRef.current = null;
+        void refreshAuditLogsRef.current();
+      }, 200);
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (auditProgressRefreshTimerRef.current !== null) {
+        window.clearTimeout(auditProgressRefreshTimerRef.current);
+        auditProgressRefreshTimerRef.current = null;
+      }
+    };
   }, []);
+
+  useEffect(() => {
+    refreshAuditLogsRef.current = refreshAuditLogs;
+  });
 
   useEffect(() => {
     const unsubscribe = window.windowsClient.onUpdateStatus((state) => {
@@ -2196,6 +2238,7 @@ function App(): ReactElement {
     if (
       !selectedAgent ||
       selectedConversation.archivedAt ||
+      selectedConversation.transcript.length > 0 ||
       sessionReady ||
       sessionStarting ||
       manualStoppedConversationIdsRef.current.has(selectedConversation.id)
@@ -2204,7 +2247,14 @@ function App(): ReactElement {
     }
 
     void startSession({ silent: true });
-  }, [selectedAgent?.id, selectedConversation.id, selectedConversation.archivedAt, sessionReady, sessionStarting]);
+  }, [
+    selectedAgent?.id,
+    selectedConversation.id,
+    selectedConversation.archivedAt,
+    selectedConversation.transcript.length,
+    sessionReady,
+    sessionStarting,
+  ]);
 
   useEffect(() => {
     if (
@@ -2331,7 +2381,11 @@ function App(): ReactElement {
     };
   }, [activeSection, selectedConversation.id, transcript]);
 
-  function commitAgentConversation(agentId: string, conversation: AgentConversationState): void {
+  function commitAgentConversation(
+    agentId: string,
+    conversation: AgentConversationState,
+    options: { activate?: boolean } = {},
+  ): void {
     const nextConversation = {
       ...conversation,
       transcript: [...conversation.transcript],
@@ -2346,10 +2400,12 @@ function App(): ReactElement {
       ...agentConversationsRef.current,
       [agentId]: nextConversations,
     };
-    activeConversationIdsRef.current = {
-      ...activeConversationIdsRef.current,
-      [agentId]: nextConversation.id,
-    };
+    if (options.activate || !activeConversationIdsRef.current[agentId]) {
+      activeConversationIdsRef.current = {
+        ...activeConversationIdsRef.current,
+        [agentId]: nextConversation.id,
+      };
+    }
     persistConversationStore();
     setConversationRevision((revision) => revision + 1);
   }
@@ -2430,7 +2486,7 @@ function App(): ReactElement {
 
   function switchWorkbenchAgent(agent: AgentConfig): void {
     if (!agentConversationsRef.current[agent.id]?.length) {
-      commitAgentConversation(agent.id, createAgentConversation(agent));
+      commitAgentConversation(agent.id, createAgentConversation(agent), { activate: true });
     }
     selectedAgentIdRef.current = agent.id;
     setSelectedAgentId(agent.id);
@@ -2445,7 +2501,7 @@ function App(): ReactElement {
       workspace: activeWorkspace,
     };
     manualStoppedConversationIdsRef.current.delete(nextConversation.id);
-    commitAgentConversation(selectedAgent.id, nextConversation);
+    commitAgentConversation(selectedAgent.id, nextConversation, { activate: true });
     setActiveSection('workbench');
     setAgentNotice(null);
   }
@@ -6310,8 +6366,10 @@ function App(): ReactElement {
                   }
                 >
                   <option value="">全部状态</option>
+                  <option value="running">执行中</option>
                   <option value="success">成功</option>
                   <option value="failure">失败</option>
+                  <option value="info">信息</option>
                 </select>
               </label>
               <label>
@@ -6392,8 +6450,8 @@ function App(): ReactElement {
                             </button>
                           )}
                         </div>
-                        <small className={entry.status === 'success' ? 'enabled' : 'disabled'}>
-                          {entry.status === 'success' ? '成功' : '失败'}
+                        <small className={getAuditStatusClassName(entry.status)}>
+                          {getAuditStatusLabel(entry.status)}
                         </small>
                       </div>
                     );
@@ -6478,8 +6536,8 @@ function App(): ReactElement {
             <div className="audit-detail-meta">
               <span>{getAuditActionLabel(expandedAuditEntry.businessAction)}</span>
               <span>{formatLocalTimestamp(getAuditStartTime(expandedAuditEntry))}</span>
-              <small className={expandedAuditEntry.status === 'success' ? 'enabled' : 'disabled'}>
-                {expandedAuditEntry.status === 'success' ? '成功' : '失败'}
+              <small className={getAuditStatusClassName(expandedAuditEntry.status)}>
+                {getAuditStatusLabel(expandedAuditEntry.status)}
               </small>
             </div>
             <pre className="audit-detail-content">{getAuditFullContent(expandedAuditEntry)}</pre>

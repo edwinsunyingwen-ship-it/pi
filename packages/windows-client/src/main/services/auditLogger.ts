@@ -13,7 +13,8 @@ export class AuditLogger {
 	async write(entry: AuditLogEntry): Promise<void> {
 		await mkdir(this.logsDirectory, { recursive: true });
 
-		const day = entry.timestamp.slice(0, 10);
+		const timestamp = new Date(entry.timestamp);
+		const day = Number.isNaN(timestamp.getTime()) ? entry.timestamp.slice(0, 10) : this.formatLocalDate(timestamp);
 		const filePath = join(this.logsDirectory, `audit-${day}.jsonl`);
 		await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
 	}

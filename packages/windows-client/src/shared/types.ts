@@ -1,4 +1,5 @@
-export type AuditStatus = "success" | "failure";
+export type AuditStatus = "running" | "success" | "failure" | "info";
+export type AgentOperationStatus = "success" | "failure";
 
 export interface AuditLogEntry {
 	timestamp: string;
@@ -179,7 +180,7 @@ export interface AgentCapabilityCallLog {
 	outputSummary?: string;
 	fullInput?: string;
 	fullOutput?: string;
-	status: AuditStatus;
+	status: AgentOperationStatus;
 	startedAt?: string;
 	endedAt?: string;
 	durationMs?: number;
@@ -196,7 +197,7 @@ export interface AgentModelInteractionLog {
 	outputSummary?: string;
 	fullInput?: string;
 	fullOutput?: string;
-	status: AuditStatus;
+	status: AgentOperationStatus;
 	startedAt?: string;
 	endedAt?: string;
 	errorMessage?: string;

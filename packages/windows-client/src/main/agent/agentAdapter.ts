@@ -111,6 +111,22 @@ interface ToolResultCapabilityMeta {
 	capabilityName?: string;
 }
 
+export interface AgentExecutionDiagnostics {
+	capabilityCalls: AgentCapabilityCallLog[];
+	modelInteractions: AgentModelInteractionLog[];
+	progressEvents: AgentProgressEvent[];
+}
+
+export class AgentExecutionError extends Error {
+	constructor(
+		message: string,
+		readonly diagnostics: AgentExecutionDiagnostics,
+	) {
+		super(message);
+		this.name = "AgentExecutionError";
+	}
+}
+
 export interface AgentAdapter {
 	startSession(options?: AgentStartOptions): Promise<AgentSession>;
 	sendUserMessage(
@@ -260,13 +276,18 @@ export class RpcAgentAdapter implements AgentAdapter {
 		try {
 			await this.sendCommand(state, { type: "prompt", message, images });
 			events = await waitForEnd;
+		} catch (error) {
+			if (state.session.state !== "stopped") {
+				state.session = { ...state.session, state: "idle" };
+			}
+			throw this.createExecutionError(state, error);
 		} finally {
 			state.progressHandler = undefined;
 		}
 		const assistantError = this.extractAssistantError(events);
 		if (assistantError) {
 			state.session = { ...state.session, state: "idle" };
-			throw new Error(assistantError);
+			throw this.createExecutionError(state, assistantError);
 		}
 		const responseText =
 			this.extractAssistantText(events) ||
@@ -274,7 +295,7 @@ export class RpcAgentAdapter implements AgentAdapter {
 			"石斧智能体运行时已完成本轮处理，但没有返回可展示的文本内容。";
 		if (!responseText.trim() || responseText.startsWith("石斧智能体运行时")) {
 			state.session = { ...state.session, state: "idle" };
-			throw new Error("石斧智能体运行时已完成本轮处理，但没有收到模型返回的文本内容。");
+			throw this.createExecutionError(state, "石斧智能体运行时已完成本轮处理，但没有收到模型返回的文本内容。");
 		}
 		state.session = { ...state.session, state: "idle" };
 		const endedAt = new Date().toISOString();
@@ -2026,6 +2047,15 @@ export default function (pi) {
 		};
 		state.progressEvents.push(progressEvent);
 		state.progressHandler?.(progressEvent);
+	}
+
+	private createExecutionError(state: RpcProcessSession, error: unknown): AgentExecutionError {
+		const message = error instanceof Error ? error.message : String(error);
+		return new AgentExecutionError(message, {
+			capabilityCalls: this.extractCapabilityCalls(state.events),
+			modelInteractions: this.extractModelInteractions(state.events),
+			progressEvents: [...state.progressEvents],
+		});
 	}
 
 	private formatDuration(ms: number): string {

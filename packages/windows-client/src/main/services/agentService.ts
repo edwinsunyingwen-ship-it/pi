@@ -15,7 +15,7 @@ import type {
 	MtclawRouterConfig,
 	MtclawRouterConnectionTestResult,
 } from "../../shared/types";
-import type { AgentAdapter } from "../agent/agentAdapter";
+import { type AgentAdapter, AgentExecutionError } from "../agent/agentAdapter";
 import type { AuditLogger } from "./auditLogger";
 import type { ConfigService } from "./configService";
 import type { SubagentDelegationRequest, SubagentDelegationResult } from "./subagentBridgeService";
@@ -165,13 +165,28 @@ export class AgentService {
 			fullInput: message,
 			status: "success",
 		});
-		if (onProgress) {
-			this.liveProgressHandlers.set(sessionId, onProgress);
-		}
+		const seenProgressEventIds = new Set<string>();
+		let progressAuditChain = Promise.resolve();
+		const captureProgress = (event: AgentProgressEvent): void => {
+			if (seenProgressEventIds.has(event.id)) {
+				return;
+			}
+			seenProgressEventIds.add(event.id);
+			progressAuditChain = progressAuditChain.then(async () => {
+				try {
+					await this.writeProgressEventAudit(event);
+				} catch (error) {
+					console.error("Failed to persist agent progress audit entry.", error);
+				}
+				onProgress?.(event);
+			});
+		};
+		this.liveProgressHandlers.set(sessionId, captureProgress);
 		const routerRequestStartedAt = new Date().toISOString();
 
 		try {
-			const result = await this.adapter.sendUserMessage(sessionId, message, images, onProgress);
+			const result = await this.adapter.sendUserMessage(sessionId, message, images, captureProgress);
+			await progressAuditChain;
 			await this.writeModelInteractionAudits(sessionId, result.modelInteractions ?? []);
 			result.capabilityCalls = await this.writeCapabilityCallAudits(sessionId, result.capabilityCalls ?? []);
 			const configState = await this.configService.getConfig();
@@ -182,7 +197,8 @@ export class AgentService {
 					routerRequestStartedAt,
 					configState.config.mtclawRouter,
 				);
-				onProgress?.(routerEvent);
+				captureProgress(routerEvent);
+				await progressAuditChain;
 				result.progressEvents = [...(result.progressEvents ?? []), routerEvent];
 			}
 			await this.writeAudit({
@@ -194,6 +210,11 @@ export class AgentService {
 			});
 			return result;
 		} catch (error) {
+			await progressAuditChain;
+			if (error instanceof AgentExecutionError) {
+				await this.writeModelInteractionAudits(sessionId, error.diagnostics.modelInteractions);
+				await this.writeCapabilityCallAudits(sessionId, error.diagnostics.capabilityCalls);
+			}
 			await this.writeAudit({
 				sessionId,
 				businessAction: "agent-assistant-reply",
@@ -202,7 +223,7 @@ export class AgentService {
 			});
 			throw error;
 		} finally {
-			if (onProgress && this.liveProgressHandlers.get(sessionId) === onProgress) {
+			if (this.liveProgressHandlers.get(sessionId) === captureProgress) {
 				this.liveProgressHandlers.delete(sessionId);
 			}
 		}
@@ -709,6 +730,21 @@ export class AgentService {
 			batch: false,
 			status: options.status,
 			errorMessage: options.errorMessage,
+		});
+	}
+
+	private async writeProgressEventAudit(event: AgentProgressEvent): Promise<void> {
+		const toolMatch = event.title.match(/^(?:调用工具|工具进展|工具完成)：(.+)$/);
+		const outputSummary = event.detail ? `${event.title}：${event.detail}` : event.title;
+		await this.writeAudit({
+			sessionId: event.sessionId,
+			toolName: toolMatch?.[1] ?? (event.source === "subagent" ? "subagent-runtime" : "agent-runtime"),
+			businessAction: event.source === "subagent" ? "subagent-progress" : "agent-progress",
+			operationStartedAt: event.timestamp,
+			inputSummary: event.title,
+			outputSummary: this.truncate(outputSummary, 500),
+			fullOutput: this.redactSensitive(JSON.stringify(event, null, 2)),
+			status: event.status,
 		});
 	}
 
