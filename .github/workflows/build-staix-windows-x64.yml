@@ -52,7 +52,7 @@ jobs:
         shell: pwsh
         run: |
           $release = "packages/windows-client/release"
-          $installer = Join-Path $release "Staix-Setup-1.0.6-x64.exe"
+          $installer = Join-Path $release "Staix-Setup-1.0.8-x64.exe"
           $blockmap = "$installer.blockmap"
           $manifest = Join-Path $release "latest.yml"
           foreach ($path in @($installer, $blockmap, $manifest)) {
@@ -61,22 +61,22 @@ jobs:
             }
           }
           $manifestText = Get-Content -LiteralPath $manifest -Raw
-          if ($manifestText -notmatch "version:\s*1\.0\.6" -or $manifestText -notmatch "Staix-Setup-1\.0\.6-x64\.exe") {
-            throw "latest.yml does not describe Staix 1.0.6 x64."
+          if ($manifestText -notmatch "version:\s*1\.0\.8" -or $manifestText -notmatch "Staix-Setup-1\.0\.8-x64\.exe") {
+            throw "latest.yml does not describe Staix 1.0.8 x64."
           }
           $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Staix-Setup-1.0.6-x64.exe" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+          "$hash  Staix-Setup-1.0.8-x64.exe" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
           Get-Item -LiteralPath $installer, $blockmap, $manifest, "$installer.sha256" |
             Select-Object Name, Length
 
       - name: Upload Windows release
         uses: actions/upload-artifact@v4
         with:
-          name: Staix-1.0.6-x64-windows
+          name: Staix-1.0.8-x64-windows
           path: |
-            packages/windows-client/release/Staix-Setup-1.0.6-x64.exe
-            packages/windows-client/release/Staix-Setup-1.0.6-x64.exe.blockmap
-            packages/windows-client/release/Staix-Setup-1.0.6-x64.exe.sha256
+            packages/windows-client/release/Staix-Setup-1.0.8-x64.exe
+            packages/windows-client/release/Staix-Setup-1.0.8-x64.exe.blockmap
+            packages/windows-client/release/Staix-Setup-1.0.8-x64.exe.sha256
             packages/windows-client/release/latest.yml
           if-no-files-found: error
           retention-days: 14
@@ -94,7 +94,7 @@ jobs:
       - name: Download verified Windows release
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: Staix-1.0.6-x64-windows
+          name: Staix-1.0.8-x64-windows
           path: release
 
       - name: Validate deployment configuration
@@ -107,8 +107,8 @@ jobs:
           [[ "$UPDATE_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           [[ "$UPDATE_USER" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$UPDATE_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
-          test -f release/Staix-Setup-1.0.6-x64.exe
-          test -f release/Staix-Setup-1.0.6-x64.exe.blockmap
+          test -f release/Staix-Setup-1.0.8-x64.exe
+          test -f release/Staix-Setup-1.0.8-x64.exe.blockmap
           test -f release/latest.yml
 
       - name: Configure SSH
@@ -130,9 +130,9 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/staix-update "$UPDATE_USER@$UPDATE_HOST" "mkdir -p '$UPDATE_PATH'"
           scp -i ~/.ssh/staix-update \
-            release/Staix-Setup-1.0.6-x64.exe \
-            release/Staix-Setup-1.0.6-x64.exe.blockmap \
-            release/Staix-Setup-1.0.6-x64.exe.sha256 \
+            release/Staix-Setup-1.0.8-x64.exe \
+            release/Staix-Setup-1.0.8-x64.exe.blockmap \
+            release/Staix-Setup-1.0.8-x64.exe.sha256 \
             "$UPDATE_USER@$UPDATE_HOST:$UPDATE_PATH/"
 
       - name: Publish latest manifest last

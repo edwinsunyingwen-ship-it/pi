@@ -5,21 +5,28 @@ import type { AuditLogEntry, AuditLogListResult, AuditLogQuery } from "../../sha
 
 export class AuditLogger {
 	private readonly logsDirectory: string;
+	private operationQueue: Promise<void> = Promise.resolve();
 
 	constructor(logsDirectory = join(app.getPath("userData"), "logs")) {
 		this.logsDirectory = logsDirectory;
 	}
 
-	async write(entry: AuditLogEntry): Promise<void> {
-		await mkdir(this.logsDirectory, { recursive: true });
+	write(entry: AuditLogEntry): Promise<void> {
+		return this.enqueueOperation(async () => {
+			await mkdir(this.logsDirectory, { recursive: true });
 
-		const timestamp = new Date(entry.timestamp);
-		const day = Number.isNaN(timestamp.getTime()) ? entry.timestamp.slice(0, 10) : this.formatLocalDate(timestamp);
-		const filePath = join(this.logsDirectory, `audit-${day}.jsonl`);
-		await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+			const timestamp = new Date(entry.timestamp);
+			const day = Number.isNaN(timestamp.getTime()) ? entry.timestamp.slice(0, 10) : this.formatLocalDate(timestamp);
+			const filePath = join(this.logsDirectory, `audit-${day}.jsonl`);
+			await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+		});
 	}
 
-	async listRecent(query: AuditLogQuery = {}): Promise<AuditLogListResult> {
+	listRecent(query: AuditLogQuery = {}): Promise<AuditLogListResult> {
+		return this.enqueueOperation(() => this.listRecentUnqueued(query));
+	}
+
+	private async listRecentUnqueued(query: AuditLogQuery): Promise<AuditLogListResult> {
 		const now = new Date();
 		const defaultStart = new Date(now);
 		defaultStart.setDate(defaultStart.getDate() - 7);
@@ -67,6 +74,15 @@ export class AuditLogger {
 			total: sorted.length,
 			hasMore: offset + limit < sorted.length,
 		};
+	}
+
+	private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+		const result = this.operationQueue.then(operation);
+		this.operationQueue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	}
 
 	private parseQueryDate(value: string | undefined, fallback: Date): Date {

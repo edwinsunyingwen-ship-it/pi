@@ -25,8 +25,13 @@ function compareConversationsByCreatedAtDescending(
 
 export class ConversationStoreService {
 	private readonly storePath = join(app.getPath("userData"), "conversations.json");
+	private operationQueue: Promise<void> = Promise.resolve();
 
-	async getStore(): Promise<ConversationStoreState> {
+	getStore(): Promise<ConversationStoreState> {
+		return this.enqueueOperation(() => this.getStoreUnqueued());
+	}
+
+	private async getStoreUnqueued(): Promise<ConversationStoreState> {
 		try {
 			const raw = await readFile(this.storePath, "utf8");
 			return this.normalizeStore(JSON.parse(raw) as Partial<ConversationStoreState>);
@@ -37,13 +42,24 @@ export class ConversationStoreService {
 		}
 	}
 
-	async saveStore(store: ConversationStoreState): Promise<ConversationStoreState> {
-		const normalizedStore = this.normalizeStore({
-			...store,
-			updatedAt: new Date().toISOString(),
+	saveStore(store: ConversationStoreState): Promise<ConversationStoreState> {
+		return this.enqueueOperation(async () => {
+			const normalizedStore = this.normalizeStore({
+				...store,
+				updatedAt: new Date().toISOString(),
+			});
+			await this.writeStore(normalizedStore);
+			return normalizedStore;
 		});
-		await this.writeStore(normalizedStore);
-		return normalizedStore;
+	}
+
+	private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+		const result = this.operationQueue.then(operation);
+		this.operationQueue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	}
 
 	private async writeStore(store: ConversationStoreState): Promise<void> {
