@@ -19,6 +19,8 @@
 		"windows:typecheck": "npm --workspace @pi-agent/windows-client run typecheck",
 		"windows:build": "npm --workspace @pi-agent/windows-client run build",
 		"windows:dist": "npm run build && npm --workspace @pi-agent/windows-client run dist",
+		"linux:build": "npm --workspace @pi-agent/windows-client run build",
+		"linux:dist": "npm run build && npm --workspace @pi-agent/windows-client run dist:linux",
 		"check": "biome check --write --error-on-warnings . && tsgo --noEmit && npm run windows:typecheck && npm run check:browser-smoke && cd packages/web-ui && npm run check",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
 		"profile:tui": "node scripts/profile-coding-agent-node.mjs --mode tui",

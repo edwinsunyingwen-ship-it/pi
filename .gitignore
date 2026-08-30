@@ -48,3 +48,7 @@ collect.sh
 .electron-cache/
 .electron-builder-cache/
 packages/windows-client/release/
+
+# Generated and temporary local artifacts
+_tmp/
+output/
